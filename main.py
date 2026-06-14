@@ -2,7 +2,9 @@ import getpass
 import logging
 import re
 import sys
+import termios
 import time
+import tty
 from pathlib import Path
 
 from garminconnect import Garmin
@@ -32,6 +34,17 @@ def setup_logging():
         format="[%(asctime)s %(levelname)-7s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+
+def read_one_key() -> str:
+    """Read a single keypress from the terminal without waiting for Enter."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        return sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 def find_latest_tcx_file(directory: Path) -> Path:
@@ -105,8 +118,6 @@ def garmin_login() -> Garmin:
 def main():
     setup_logging()
 
-    dry_run = "--dry-run" in sys.argv
-
     # Log in to Garmin up front, before touching any files.
     client = garmin_login()
 
@@ -119,9 +130,16 @@ def main():
     activity_name = TRAINERDAY_TCX_REGEX.match(tcx_file.stem).group("title").strip()
     log.info(f"Parsed activity name: {activity_name}")
 
-    # Return early if dry run
-    if dry_run:
-        log.warning("DRY RUN: No upload or edits will be performed.")
+    # Confirm before uploading. Enter proceeds; any other key aborts.
+    print(
+        "Press Enter to continue (or any other key to abort): ",
+        end="",
+        flush=True,
+    )
+    key = read_one_key()
+    print()  # move off the prompt line
+    if key not in ("\r", "\n"):
+        log.warning("Aborted.")
         return 0
 
     # Save the current last activity before upload so we can recognise the newly-created one

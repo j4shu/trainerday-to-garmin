@@ -26,8 +26,9 @@ This script simply automates the manual process above. When you run it, it:
    - Defaults to `~/Library/CloudStorage/Dropbox/Apps/TrainerDay`.
 3. Parses the workout title from the filename.
    - For example, `2026-06-09 20-35-37 - Z2 60%.tcx` becomes `Z2 60%`.
-4. Uploads it to Garmin Connect.
-5. Edits the activity's type and name.
+4. Prompts you to confirm before uploading. Press `Enter` to continue,
+   or any other key to abort without uploading.
+5. Performs the upload and edits to Garmin Connect.
 
 Editing activity fields can only happen after the initial upload. The script
 handles this by snapshotting your most recent activity before upload and then
@@ -50,15 +51,6 @@ uv sync
 ```
 
 ## Usage
-
-Dry run: Log in to Garmin, then find the latest `.tcx` only (no upload or
-edits).
-
-```
-uv run main.py --dry-run
-```
-
-Same as above, but continue to perform the upload and edits:
 
 ```
 uv run main.py
