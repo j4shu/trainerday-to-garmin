@@ -3,6 +3,9 @@
 .garminconnect/
 garmin_tokens.json
 
+# Secrets (intervals.icu API key, loaded via python-dotenv)
+.env
+
 # Python
 __pycache__/
 *.py[cod]

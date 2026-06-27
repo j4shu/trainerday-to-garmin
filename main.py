@@ -1,5 +1,6 @@
 import getpass
 import logging
+import os
 import re
 import sys
 import termios
@@ -7,7 +8,10 @@ import time
 import tty
 from pathlib import Path
 
+from dotenv import load_dotenv
 from garminconnect import Garmin
+from requests import get, put
+from requests.auth import HTTPBasicAuth
 
 TRAINERDAY_DIR = Path("~/Library/CloudStorage/Dropbox/Apps/TrainerDay").expanduser()
 TOKENSTORE = Path("~/.garminconnect").expanduser()
@@ -24,11 +28,13 @@ ACTIVITY_TYPE_DTO = {
     "typeKey": "virtual_ride",
     "parentTypeId": 2,
 }
+
+INTERVALS_ICU_BASE_URL = "https://intervals.icu/api/v1"
+
 log = logging.getLogger("main")
 
 
-def setup_logging():
-    """Timestamped logging to stderr at INFO level."""
+def setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="[%(asctime)s %(levelname)-7s] %(message)s",
@@ -36,15 +42,52 @@ def setup_logging():
     )
 
 
-def read_one_key() -> str:
-    """Read a single keypress from the terminal without waiting for Enter."""
+def confirm(
+    prompt: str = "Press Enter to continue (or any other key to abort): ",
+) -> bool:
+    print(prompt, end="", flush=True)
+
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        return sys.stdin.read(1)
+        key = sys.stdin.read(1)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    print()  # move off the prompt line
+    confirmed = key in ("\r", "\n")
+    if not confirmed:
+        log.warning("Aborted.")
+    return confirmed
+
+
+def garmin_login() -> Garmin:
+    """
+    Return an authenticated Garmin client, logging in at the start of a run.
+    Reuses the cached session at TOKENSTORE when present and still valid
+    (refreshing a near-expiry token); otherwise prompts for credentials (+ MFA)
+    and caches a fresh session.
+    """
+    if TOKENSTORE.exists():
+        try:
+            client = Garmin()
+            client.login(str(TOKENSTORE))  # validates + refreshes if near expiry
+            log.info(f"Found cached Garmin session: {TOKENSTORE}.")
+            return client
+        except Exception as exc:
+            log.warning(f"Cached session unusable: ({exc}); logging in fresh.")
+
+    email = input("Garmin Connect email: ").strip()
+    password = getpass.getpass("Garmin Connect password: ")
+    client = Garmin(
+        email=email,
+        password=password,
+        prompt_mfa=lambda: input("MFA/2FA code: ").strip(),
+    )
+    client.login(str(TOKENSTORE))  # caches tokens to TOKENSTORE
+    log.info(f"Successfully logged in. Garmin session cached: {TOKENSTORE}")
+    return client
 
 
 def find_latest_tcx_file(directory: Path) -> Path:
@@ -55,7 +98,7 @@ def find_latest_tcx_file(directory: Path) -> Path:
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
-def wait_for_activity_upload(
+def wait_for_upload(
     client: Garmin,
     last_activity: dict,
     timeout: int = 30,
@@ -83,46 +126,45 @@ def wait_for_activity_upload(
         time.sleep(poll_interval)
 
 
-def garmin_interactive_login() -> Garmin:
-    """Prompt for credentials (+ MFA) and cache a fresh OAuth token to TOKENSTORE."""
-    email = input("Garmin Connect email: ").strip()
-    password = getpass.getpass("Garmin Connect password: ")
-    client = Garmin(
-        email=email,
-        password=password,
-        prompt_mfa=lambda: input("MFA/2FA code: ").strip(),
+def intervals_auth() -> HTTPBasicAuth:
+    """HTTP Basic auth for intervals.icu."""
+    key = os.environ.get("INTERVALS_API_KEY")
+    if not key:
+        raise SystemExit(
+            "INTERVALS_API_KEY is not set. Create one at intervals.icu → "
+            "Settings → Developer, then: export INTERVALS_API_KEY=your_api_key"
+        )
+    return HTTPBasicAuth("API_KEY", key)
+
+
+def find_latest_intervals_activity() -> dict:
+    """Return the most recent intervals.icu activity."""
+    resp = get(
+        f"{INTERVALS_ICU_BASE_URL}/athlete/0/activities",
+        params={"oldest": "2026-01-01", "limit": 1},
+        auth=intervals_auth(),
+        timeout=30,
     )
-    client.login(str(TOKENSTORE))  # caches tokens to TOKENSTORE
-    log.info(f"Sucessfully logged in. Garmin session cached: {TOKENSTORE}")
-    return client
+    resp.raise_for_status()
+    activities = resp.json()
+    return activities[0]
 
 
-def garmin_login() -> Garmin:
-    """Return an authenticated Garmin client, logging in at the start of a run.
-
-    Reuses the cached session at TOKENSTORE when present and still valid
-    (refreshing a near-expiry token); otherwise prompts for credentials and
-    caches a fresh session.
-    """
-    if TOKENSTORE.exists():
-        try:
-            client = Garmin()
-            client.login(str(TOKENSTORE))  # validates + refreshes if near expiry
-            log.info(f"Found cached Garmin session: {TOKENSTORE}.")
-            return client
-        except Exception as exc:
-            log.warning(f"Cached session unusable: ({exc}); logging in fresh.")
-    return garmin_interactive_login()
+def edit_intervals_activity_type(id: str, activity_type: str) -> None:
+    """Edit the activity type of an intervals.icu activity."""
+    resp = put(
+        f"{INTERVALS_ICU_BASE_URL}/activity/{id}",
+        json={"type": activity_type},
+        auth=intervals_auth(),
+        timeout=30,
+    )
+    resp.raise_for_status()
 
 
-def main():
-    setup_logging()
-
-    # Log in to Garmin up front, before touching any files.
-    client = garmin_login()
-
+def trainerday_to_garmin(client: Garmin) -> bool:
+    """Upload the latest TrainerDay .tcx to Garmin and edit its name/type."""
     # Find the latest TCX file exported by TrainerDay
-    tcx_file = find_latest_tcx_file(TRAINERDAY_DIR)
+    tcx_file = find_latest_tcx_file(directory=TRAINERDAY_DIR)
     log.info(f"Found latest tcx file: {tcx_file.name}")
     log.info(f"Full path: {tcx_file.resolve()}")
 
@@ -131,16 +173,8 @@ def main():
     log.info(f"Parsed activity name: {activity_name}")
 
     # Confirm before uploading. Enter proceeds; any other key aborts.
-    print(
-        "Press Enter to continue (or any other key to abort): ",
-        end="",
-        flush=True,
-    )
-    key = read_one_key()
-    print()  # move off the prompt line
-    if key not in ("\r", "\n"):
-        log.warning("Aborted.")
-        return 0
+    if not confirm():
+        return False
 
     # Save the current last activity before upload so we can recognise the newly-created one
     # and never touch a pre-existing activity.
@@ -151,30 +185,63 @@ def main():
     log.info(f"Garmin upload initiated. Result: {result}")
 
     # Wait for it to appear
-    new_activity = wait_for_activity_upload(client, last_activity)
+    new_activity = wait_for_upload(client=client, last_activity=last_activity)
     new_activity_id = new_activity.get("activityId")
-    # log.info(f"Uploaded activity before edits: {new_activity}")
 
     # Sleep to let Garmin activity processing to settle before editing
     time.sleep(3)
 
-    # Edit it and finish
+    # Edit it
     activity_type = ACTIVITY_TYPE_DTO["typeKey"]
     log.info(f"Editing activity name to: {activity_name}")
     client.set_activity_name(new_activity_id, activity_name)
     log.info(f"Editing activity type to: {activity_type}")
     client.set_activity_type(new_activity_id, *ACTIVITY_TYPE_DTO.values())
 
-    # Verify the edits stuck
-    log.info("Verifying activity after edits...")
-    verify_activity = client.get_activity(new_activity_id)
-    # log.info(f"Verifying activity after edits: {verify_activity}")
-    assert verify_activity.get("activityName") == activity_name
-    assert verify_activity.get("activityTypeDTO").get("typeKey") == activity_type
+    return True
+
+
+def garmin_to_intervals(wait: bool = True) -> int:
+    """Edit the activity type after it syncs to intervals.icu."""
+    if wait:
+        log.info("Waiting a few seconds for intervals.icu to sync...")
+        time.sleep(5)
+
+    # Find it
+    intervals_activity = find_latest_intervals_activity()
+    log.info(f"Found latest intervals.icu activity: {intervals_activity['name']} ")
+
+    # Confirm before editing
+    if not confirm():
+        return 0
+
+    # Edit it
+    activity_type = "VirtualRide"
+    log.info(f"Editing activity type to: {activity_type}")
+    edit_intervals_activity_type(
+        id=intervals_activity["id"], activity_type=activity_type
+    )
 
     log.info("Done.")
     return 0
 
 
+def main(argv) -> int:
+    load_dotenv()
+    setup_logging()
+
+    section = argv[1] if len(argv) > 1 else "all"
+    if section == "all":
+        client = garmin_login()
+        if not trainerday_to_garmin(client=client):
+            return 0
+        return garmin_to_intervals()
+    elif section == "intervals":
+        return garmin_to_intervals(wait=False)
+    else:
+        print("usage: main.py [intervals]", file=sys.stderr)
+        return 2
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv))
