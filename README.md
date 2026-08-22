@@ -22,8 +22,7 @@ edited activity type from Garmin, so it needs it be edited there as well.
 
 ## How It Works
 
-This script simply automates the manual process above. It runs start to finish
-without prompting. When you run it, it:
+This script simply automates the manual process above. When you run it, it:
 
 1. Snapshots your most recent Intervals.icu activity.
 2. Logs in to Garmin. The credentials are cached at `~/.garminconnect` for
@@ -33,7 +32,7 @@ without prompting. When you run it, it:
 4. Parses the workout title from the filename.
    - For example, `2026-06-09 20-35-37 - Z2 60%.tcx` becomes `Z2 60%`.
 5. Performs the upload and edits to Garmin Connect.
-6. Polls until Intervals.icu syncs the activity, for up to 30 seconds.
+6. Polls until Intervals.icu syncs the activity.
 7. Edits the activity type on Intervals.icu.
 
 Editing activity fields can only happen after the initial upload. The script
