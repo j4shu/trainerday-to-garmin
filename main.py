@@ -39,7 +39,7 @@ def setup_logging() -> None:
     )
 
 
-def log_in_to_garmin() -> Garmin:
+def login_to_garmin() -> Garmin:
     """
     Return an authenticated Garmin client, logging in at the start of a run.
     Reuses the cached session at TOKENSTORE when present and still valid
@@ -67,7 +67,7 @@ def log_in_to_garmin() -> Garmin:
     return client
 
 
-def find_latest_tcx_file(directory: Path) -> Path:
+def get_latest_tcx_file(directory: Path) -> Path:
     """Return the most recently modified .tcx file in the given directory."""
     files = [p for p in directory.glob("*.tcx") if p.is_file()]
     if not files:
@@ -78,7 +78,7 @@ def find_latest_tcx_file(directory: Path) -> Path:
 def wait_for_garmin_upload(
     client: Garmin,
     last_activity: dict,
-    timeout: int = 120,
+    timeout: int = 30,
     poll_interval: int = 5,
 ) -> dict:
     """Return the just-uploaded activity, identified as the new most-recent
@@ -114,7 +114,7 @@ def intervals_icu_auth() -> HTTPBasicAuth:
     return HTTPBasicAuth("API_KEY", key)
 
 
-def find_latest_intervals_icu_activity() -> dict:
+def get_latest_intervals_icu_activity() -> dict:
     """Return the most recent intervals.icu activity."""
     resp = get(
         f"{INTERVALS_ICU_BASE_URL}/athlete/0/activities",
@@ -141,7 +141,7 @@ def set_intervals_icu_activity_type(activity_id: str, activity_type: str) -> Non
 def upload_garmin_activity(client: Garmin) -> None:
     """Upload the latest TrainerDay .tcx to Garmin and edit its name/type."""
     # Find the latest TCX file exported by TrainerDay
-    tcx_file = find_latest_tcx_file(directory=TRAINERDAY_DIR)
+    tcx_file = get_latest_tcx_file(directory=TRAINERDAY_DIR)
     log.info(f"Found latest tcx file: {tcx_file.name}")
     log.info(f"Full path: {tcx_file.resolve()}")
 
@@ -174,7 +174,7 @@ def upload_garmin_activity(client: Garmin) -> None:
 
 def wait_for_intervals_icu_sync(
     baseline_id: str,
-    timeout: int = 300,
+    timeout: int = 30,
     poll_interval: int = 10,
 ) -> dict:
     """Return the newly-synced intervals.icu activity, identified as the new
@@ -182,15 +182,13 @@ def wait_for_intervals_icu_sync(
     """
     deadline = time.monotonic() + timeout
     while True:
-        activity = find_latest_intervals_icu_activity()
+        activity = get_latest_intervals_icu_activity()
         if activity["id"] != baseline_id:
             return activity
 
         if time.monotonic() >= deadline:
             raise TimeoutError(
-                f"Waited {timeout}s but the activity never synced to intervals.icu; "
-                "giving up. The Garmin upload succeeded, so edit the activity type "
-                "there once it appears."
+                f"Waited {timeout}s but the activity never synced to intervals.icu."
             )
         log.info(
             f"Not synced to intervals.icu yet; polling again in {poll_interval}s..."
@@ -201,14 +199,14 @@ def wait_for_intervals_icu_sync(
 def tag_intervals_icu_activity(baseline_id: str) -> None:
     """Edit the activity type after it syncs to intervals.icu."""
     log.info("Waiting for intervals.icu to sync...")
-    intervals_activity = wait_for_intervals_icu_sync(baseline_id=baseline_id)
-    log.info(f"Found latest intervals.icu activity: {intervals_activity['name']} ")
+    intervals_icu_activity = wait_for_intervals_icu_sync(baseline_id=baseline_id)
+    log.info(f"Found latest intervals.icu activity: {intervals_icu_activity['name']} ")
 
     # Edit it
     activity_type = "VirtualRide"
     log.info(f"Editing activity type to: {activity_type}")
     set_intervals_icu_activity_type(
-        activity_id=intervals_activity["id"], activity_type=activity_type
+        activity_id=intervals_icu_activity["id"], activity_type=activity_type
     )
 
     log.info("Done.")
@@ -218,11 +216,8 @@ def main() -> None:
     load_dotenv()
     setup_logging()
 
-    # Snapshot the latest intervals.icu activity before uploading, so the newly
-    # synced one can be recognised later. Also fails fast on a missing API key.
-    baseline_id = find_latest_intervals_icu_activity()["id"]
-
-    client = log_in_to_garmin()
+    baseline_id = get_latest_intervals_icu_activity()["id"]
+    client = login_to_garmin()
     upload_garmin_activity(client=client)
     tag_intervals_icu_activity(baseline_id=baseline_id)
 

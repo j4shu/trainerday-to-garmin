@@ -33,7 +33,7 @@ without prompting. When you run it, it:
 4. Parses the workout title from the filename.
    - For example, `2026-06-09 20-35-37 - Z2 60%.tcx` becomes `Z2 60%`.
 5. Performs the upload and edits to Garmin Connect.
-6. Polls until Intervals.icu syncs the activity, for up to 5 minutes.
+6. Polls until Intervals.icu syncs the activity, for up to 30 seconds.
 7. Edits the activity type on Intervals.icu.
 
 Editing activity fields can only happen after the initial upload. The script
