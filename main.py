@@ -115,8 +115,8 @@ def intervals_auth() -> HTTPBasicAuth:
     return HTTPBasicAuth("API_KEY", key)
 
 
-def find_latest_intervals_activity() -> dict | None:
-    """Return the most recent intervals.icu activity, or None if there are none."""
+def find_latest_intervals_activity() -> dict:
+    """Return the most recent intervals.icu activity."""
     resp = get(
         f"{INTERVALS_ICU_BASE_URL}/athlete/0/activities",
         params={"oldest": "2026-01-01", "limit": 1},
@@ -125,7 +125,7 @@ def find_latest_intervals_activity() -> dict | None:
     )
     resp.raise_for_status()
     activities = resp.json()
-    return activities[0] if activities else None
+    return activities[0]
 
 
 def edit_intervals_activity_type(id: str, activity_type: str) -> None:
@@ -174,7 +174,7 @@ def trainerday_to_garmin(client: Garmin) -> None:
 
 
 def wait_for_intervals_sync(
-    baseline_id: str | None,
+    baseline_id: str,
     timeout: int = 300,
     poll_interval: int = 10,
 ) -> dict | None:
@@ -185,7 +185,7 @@ def wait_for_intervals_sync(
     deadline = time.monotonic() + timeout
     while True:
         activity = find_latest_intervals_activity()
-        if activity is not None and activity["id"] != baseline_id:
+        if activity["id"] != baseline_id:
             return activity
 
         if time.monotonic() >= deadline:
@@ -196,7 +196,7 @@ def wait_for_intervals_sync(
         time.sleep(poll_interval)
 
 
-def garmin_to_intervals(baseline_id: str | None) -> int:
+def garmin_to_intervals(baseline_id: str) -> int:
     """Edit the activity type after it syncs to intervals.icu."""
     log.info("Waiting for intervals.icu to sync...")
     intervals_activity = wait_for_intervals_sync(baseline_id=baseline_id)
@@ -226,8 +226,7 @@ def main() -> int:
 
     # Snapshot the latest intervals.icu activity before uploading, so the newly
     # synced one can be recognised later. Also fails fast on a missing API key.
-    baseline = find_latest_intervals_activity()
-    baseline_id = baseline["id"] if baseline else None
+    baseline_id = find_latest_intervals_activity()["id"]
 
     client = garmin_login()
     trainerday_to_garmin(client=client)
