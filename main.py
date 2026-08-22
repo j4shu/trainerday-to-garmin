@@ -177,10 +177,9 @@ def wait_for_intervals_icu_sync(
     baseline_id: str,
     timeout: int = 300,
     poll_interval: int = 10,
-) -> dict | None:
+) -> dict:
     """Return the newly-synced intervals.icu activity, identified as the new
     most-recent activity once it differs from the one seen before the upload.
-    Returns None if it never appears within the timeout.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -189,24 +188,21 @@ def wait_for_intervals_icu_sync(
             return activity
 
         if time.monotonic() >= deadline:
-            return None
+            raise TimeoutError(
+                f"Waited {timeout}s but the activity never synced to intervals.icu; "
+                "giving up. The Garmin upload succeeded, so edit the activity type "
+                "there once it appears."
+            )
         log.info(
             f"Not synced to intervals.icu yet; polling again in {poll_interval}s..."
         )
         time.sleep(poll_interval)
 
 
-def tag_intervals_icu_activity(baseline_id: str) -> int:
+def tag_intervals_icu_activity(baseline_id: str) -> None:
     """Edit the activity type after it syncs to intervals.icu."""
     log.info("Waiting for intervals.icu to sync...")
     intervals_activity = wait_for_intervals_icu_sync(baseline_id=baseline_id)
-    if intervals_activity is None:
-        log.error(
-            "Activity never synced to intervals.icu; giving up. The Garmin upload "
-            "succeeded, so edit the activity type there once it appears."
-        )
-        return 1
-
     log.info(f"Found latest intervals.icu activity: {intervals_activity['name']} ")
 
     # Edit it
@@ -217,7 +213,6 @@ def tag_intervals_icu_activity(baseline_id: str) -> int:
     )
 
     log.info("Done.")
-    return 0
 
 
 def main() -> int:
@@ -230,7 +225,8 @@ def main() -> int:
 
     client = log_in_to_garmin()
     upload_garmin_activity(client=client)
-    return tag_intervals_icu_activity(baseline_id=baseline_id)
+    tag_intervals_icu_activity(baseline_id=baseline_id)
+    return 0
 
 
 if __name__ == "__main__":

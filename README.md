@@ -41,9 +41,9 @@ handles this by snapshotting your most recent activity on both services before
 upload and then uses that to detect when the new activity appears. A
 pre-existing activity is never touched.
 
-If the activity never reaches Intervals.icu within the timeout, the script logs
-an error and exits with status 1. The Garmin upload has already succeeded at
-that point, so only the Intervals.icu activity type needs fixing by hand.
+If the activity never reaches Intervals.icu within the timeout, the script
+raises a `TimeoutError`. The Garmin upload has already succeeded at that point,
+so only the Intervals.icu activity type needs fixing by hand.
 
 ## Requirements
 
