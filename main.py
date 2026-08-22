@@ -2,7 +2,6 @@ import getpass
 import logging
 import os
 import re
-import sys
 import time
 from pathlib import Path
 
@@ -108,7 +107,7 @@ def intervals_icu_auth() -> HTTPBasicAuth:
     """HTTP Basic auth for intervals.icu."""
     key = os.environ.get("INTERVALS_API_KEY")
     if not key:
-        raise SystemExit(
+        raise RuntimeError(
             "INTERVALS_API_KEY is not set. Create one at intervals.icu → "
             "Settings → Developer, then: export INTERVALS_API_KEY=your_api_key"
         )
@@ -215,7 +214,7 @@ def tag_intervals_icu_activity(baseline_id: str) -> None:
     log.info("Done.")
 
 
-def main() -> int:
+def main() -> None:
     load_dotenv()
     setup_logging()
 
@@ -226,8 +225,7 @@ def main() -> int:
     client = log_in_to_garmin()
     upload_garmin_activity(client=client)
     tag_intervals_icu_activity(baseline_id=baseline_id)
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
