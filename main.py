@@ -139,7 +139,7 @@ def set_intervals_icu_activity_type(activity_id: str, activity_type: str) -> Non
     resp.raise_for_status()
 
 
-def upload_and_tag_garmin_activity(client: Garmin) -> None:
+def upload_garmin_activity(client: Garmin) -> None:
     """Upload the latest TrainerDay .tcx to Garmin and edit its name/type."""
     # Find the latest TCX file exported by TrainerDay
     tcx_file = find_latest_tcx_file(directory=TRAINERDAY_DIR)
@@ -229,7 +229,7 @@ def main() -> int:
     baseline_id = find_latest_intervals_icu_activity()["id"]
 
     client = log_in_to_garmin()
-    upload_and_tag_garmin_activity(client=client)
+    upload_garmin_activity(client=client)
     return tag_intervals_icu_activity(baseline_id=baseline_id)
 
 
