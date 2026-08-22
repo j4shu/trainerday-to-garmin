@@ -3,9 +3,7 @@ import logging
 import os
 import re
 import sys
-import termios
 import time
-import tty
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,26 +38,6 @@ def setup_logging() -> None:
         format="[%(asctime)s %(levelname)-7s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-
-def confirm(
-    prompt: str = "Press Enter to continue (or any other key to abort): ",
-) -> bool:
-    print(prompt, end="", flush=True)
-
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        key = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-    print()  # move off the prompt line
-    confirmed = key in ("\r", "\n")
-    if not confirmed:
-        log.warning("Aborted.")
-    return confirmed
 
 
 def garmin_login() -> Garmin:
@@ -101,7 +79,7 @@ def find_latest_tcx_file(directory: Path) -> Path:
 def wait_for_upload(
     client: Garmin,
     last_activity: dict,
-    timeout: int = 30,
+    timeout: int = 120,
     poll_interval: int = 5,
 ) -> dict:
     """Return the just-uploaded activity, identified as the new most-recent
@@ -137,8 +115,8 @@ def intervals_auth() -> HTTPBasicAuth:
     return HTTPBasicAuth("API_KEY", key)
 
 
-def find_latest_intervals_activity() -> dict:
-    """Return the most recent intervals.icu activity."""
+def find_latest_intervals_activity() -> dict | None:
+    """Return the most recent intervals.icu activity, or None if there are none."""
     resp = get(
         f"{INTERVALS_ICU_BASE_URL}/athlete/0/activities",
         params={"oldest": "2026-01-01", "limit": 1},
@@ -147,7 +125,7 @@ def find_latest_intervals_activity() -> dict:
     )
     resp.raise_for_status()
     activities = resp.json()
-    return activities[0]
+    return activities[0] if activities else None
 
 
 def edit_intervals_activity_type(id: str, activity_type: str) -> None:
@@ -161,7 +139,7 @@ def edit_intervals_activity_type(id: str, activity_type: str) -> None:
     resp.raise_for_status()
 
 
-def trainerday_to_garmin(client: Garmin) -> bool:
+def trainerday_to_garmin(client: Garmin) -> None:
     """Upload the latest TrainerDay .tcx to Garmin and edit its name/type."""
     # Find the latest TCX file exported by TrainerDay
     tcx_file = find_latest_tcx_file(directory=TRAINERDAY_DIR)
@@ -171,10 +149,6 @@ def trainerday_to_garmin(client: Garmin) -> bool:
     # Parse the activity name
     activity_name = TRAINERDAY_TCX_REGEX.match(tcx_file.stem).group("title").strip()
     log.info(f"Parsed activity name: {activity_name}")
-
-    # Confirm before uploading. Enter proceeds; any other key aborts.
-    if not confirm():
-        return False
 
     # Save the current last activity before upload so we can recognise the newly-created one
     # and never touch a pre-existing activity.
@@ -198,22 +172,42 @@ def trainerday_to_garmin(client: Garmin) -> bool:
     log.info(f"Editing activity type to: {activity_type}")
     client.set_activity_type(new_activity_id, *ACTIVITY_TYPE_DTO.values())
 
-    return True
+
+def wait_for_intervals_sync(
+    baseline_id: str | None,
+    timeout: int = 300,
+    poll_interval: int = 10,
+) -> dict | None:
+    """Return the newly-synced intervals.icu activity, identified as the new
+    most-recent activity once it differs from the one seen before the upload.
+    Returns None if it never appears within the timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        activity = find_latest_intervals_activity()
+        if activity is not None and activity["id"] != baseline_id:
+            return activity
+
+        if time.monotonic() >= deadline:
+            return None
+        log.info(
+            f"Not synced to intervals.icu yet; polling again in {poll_interval}s..."
+        )
+        time.sleep(poll_interval)
 
 
-def garmin_to_intervals(wait: bool = True) -> int:
+def garmin_to_intervals(baseline_id: str | None) -> int:
     """Edit the activity type after it syncs to intervals.icu."""
-    if wait:
-        log.info("Waiting a few seconds for intervals.icu to sync...")
-        time.sleep(5)
+    log.info("Waiting for intervals.icu to sync...")
+    intervals_activity = wait_for_intervals_sync(baseline_id=baseline_id)
+    if intervals_activity is None:
+        log.error(
+            "Activity never synced to intervals.icu; giving up. The Garmin upload "
+            "succeeded, so edit the activity type there once it appears."
+        )
+        return 1
 
-    # Find it
-    intervals_activity = find_latest_intervals_activity()
     log.info(f"Found latest intervals.icu activity: {intervals_activity['name']} ")
-
-    # Confirm before editing
-    if not confirm():
-        return 0
 
     # Edit it
     activity_type = "VirtualRide"
@@ -226,22 +220,19 @@ def garmin_to_intervals(wait: bool = True) -> int:
     return 0
 
 
-def main(argv) -> int:
+def main() -> int:
     load_dotenv()
     setup_logging()
 
-    section = argv[1] if len(argv) > 1 else "all"
-    if section == "all":
-        client = garmin_login()
-        if not trainerday_to_garmin(client=client):
-            return 0
-        return garmin_to_intervals()
-    elif section == "intervals":
-        return garmin_to_intervals(wait=False)
-    else:
-        print("usage: main.py [intervals]", file=sys.stderr)
-        return 2
+    # Snapshot the latest intervals.icu activity before uploading, so the newly
+    # synced one can be recognised later. Also fails fast on a missing API key.
+    baseline = find_latest_intervals_activity()
+    baseline_id = baseline["id"] if baseline else None
+
+    client = garmin_login()
+    trainerday_to_garmin(client=client)
+    return garmin_to_intervals(baseline_id=baseline_id)
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())
