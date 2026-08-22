@@ -24,23 +24,25 @@ edited activity type from Garmin, so it needs it be edited there as well.
 
 This script simply automates the manual process above. When you run it, it:
 
-1. Prompts you to log in to Garmin. The credentials are cached at
-   `~/.garminconnect` for future runs.
-2. Finds the most recent `.tcx` file in your TrainerDay Dropbox folder.
+1. Snapshots your most recent Intervals.icu activity.
+2. Logs in to Garmin. The credentials are cached at `~/.garminconnect` for
+   future runs.
+3. Finds the most recent `.tcx` file in your TrainerDay Dropbox folder.
    - Defaults to `~/Library/CloudStorage/Dropbox/Apps/TrainerDay`.
-3. Parses the workout title from the filename.
+4. Parses the workout title from the filename.
    - For example, `2026-06-09 20-35-37 - Z2 60%.tcx` becomes `Z2 60%`.
-4. Prompts you to confirm before uploading. Press `Enter` to continue, or any
-   other key to abort without uploading.
 5. Performs the upload and edits to Garmin Connect.
-6. Waits for Intervals.icu to sync the activity.
-7. Prompts you to confirm before editing the activity type on Intervals.icu.
-8. Edits the activity type on Intervals.icu.
+6. Polls until Intervals.icu syncs the activity.
+7. Edits the activity type on Intervals.icu.
 
 Editing activity fields can only happen after the initial upload. The script
-handles this by snapshotting your most recent activity before upload and then
-uses that to detect when the new activity appears after upload. A pre-existing
-activity is never touched.
+handles this by snapshotting your most recent activity on both services before
+upload and then uses that to detect when the new activity appears. A
+pre-existing activity is never touched.
+
+If the activity never reaches Intervals.icu within the timeout, the script
+raises a `TimeoutError`. The Garmin upload has already succeeded at that point,
+so only the Intervals.icu activity type needs fixing by hand.
 
 ## Requirements
 
@@ -73,6 +75,5 @@ export INTERVALS_API_KEY=<your_api_key>
 ## Usage
 
 ```
-uv run main.py              # full flow
-uv run main.py intervals    # re-run only the intervals.icu step
+uv run main.py
 ```
