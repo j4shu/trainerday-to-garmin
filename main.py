@@ -13,9 +13,9 @@ from requests.auth import HTTPBasicAuth
 TRAINERDAY_DIR = Path("~/Library/CloudStorage/Dropbox/Apps/TrainerDay").expanduser()
 TOKENSTORE = Path("~/.garminconnect").expanduser()
 
-# TrainerDay TCX file format: "<date> <time> - <workout title>.tcx", e.g.
-# 2026-06-09 20-35-37 - 5x3 120%, 2x 102%.tcx
-TRAINERDAY_TCX_REGEX = re.compile(
+# TrainerDay FIT file format: "<date> <time> - <workout title>.fit", e.g.
+# 2026-06-09 20-35-37 - 5x3 120%, 2x 102%.fit
+TRAINERDAY_FILE_REGEX = re.compile(
     r"^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} - (?P<title>.+)$"
 )
 
@@ -67,11 +67,11 @@ def login_to_garmin() -> Garmin:
     return client
 
 
-def get_latest_tcx_file(directory: Path) -> Path:
-    """Return the most recently modified .tcx file in the given directory."""
-    files = [p for p in directory.glob("*.tcx") if p.is_file()]
+def get_latest_activity_file(directory: Path) -> Path:
+    """Return the most recently modified .fit file in the given directory."""
+    files = [p for p in directory.glob("*.fit") if p.is_file()]
     if not files:
-        raise FileNotFoundError(f"No .tcx files found in: {directory}")
+        raise FileNotFoundError(f"No .fit files found in: {directory}")
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
@@ -139,14 +139,20 @@ def set_intervals_icu_activity_type(activity_id: str, activity_type: str) -> Non
 
 
 def upload_garmin_activity(client: Garmin) -> None:
-    """Upload the latest TrainerDay .tcx to Garmin and edit its name/type."""
-    # Find the latest TCX file exported by TrainerDay
-    tcx_file = get_latest_tcx_file(directory=TRAINERDAY_DIR)
-    log.info(f"Found latest tcx file: {tcx_file.name}")
-    log.info(f"Full path: {tcx_file.resolve()}")
+    """Upload the latest TrainerDay .fit to Garmin and edit its name/type."""
+    # Find the latest FIT file exported by TrainerDay
+    activity_file = get_latest_activity_file(directory=TRAINERDAY_DIR)
+    log.info(f"Found latest fit file: {activity_file.name}")
+    log.info(f"Full path: {activity_file.resolve()}")
 
     # Parse the activity name
-    activity_name = TRAINERDAY_TCX_REGEX.match(tcx_file.stem).group("title").strip()
+    match = TRAINERDAY_FILE_REGEX.match(activity_file.stem)
+    if not match:
+        raise ValueError(
+            f"Filename does not match the expected TrainerDay format "
+            f"'<YYYY-MM-DD> <HH-MM-SS> - <title>': {activity_file.name}"
+        )
+    activity_name = match.group("title").strip()
     log.info(f"Parsed activity name: {activity_name}")
 
     # Save the current last activity before upload so we can recognise the newly-created one
@@ -154,7 +160,7 @@ def upload_garmin_activity(client: Garmin) -> None:
     last_activity = client.get_last_activity()
 
     # Upload the new activity
-    result = client.import_activity(str(tcx_file))
+    result = client.import_activity(str(activity_file))
     log.info(f"Garmin upload initiated. Result: {result}")
 
     # Wait for it to appear
