@@ -66,6 +66,7 @@ def prepare_fit_file(fit_file: Path, activity_name: str) -> Path:
     """Return a temp copy of the FIT that Garmin will file as Virtual Cycling under
     activity_name, so nothing has to be fixed up over the API after upload.
     """
+    log.info("Preparing .fit file for Garmin upload...")
     fit = FitFile.from_file(str(fit_file))
 
     builder = FitFileBuilder(auto_define=True)
@@ -93,19 +94,16 @@ def prepare_fit_file(fit_file: Path, activity_name: str) -> Path:
 
     patched_file = Path(tempfile.mkstemp(suffix=".fit")[1])
     builder.build().to_file(str(patched_file))
-    log.info(f"Set virtual_activity in {sessions} session(s), named {activity_name!r}.")
+    log.info(f"Prepared .fit file as virtual_activity, named {activity_name!r}.")
     return patched_file
 
 
 def upload_garmin_activity(client: Garmin) -> None:
     """Upload the latest TrainerDay .fit to Garmin, named after the file."""
     activity_file = get_latest_fit_file(directory=TRAINERDAY_DIR)
-
-    log.info("Preparing .fit file for Garmin upload...")
     upload_file = prepare_fit_file(
         fit_file=activity_file, activity_name=activity_file.stem
     )
-    log.info(f"Prepared .fit file for Garmin upload: {upload_file.name}")
 
     result = client.import_activity(str(upload_file))
     log.info(f"Garmin upload initiated. Result: {result}")
