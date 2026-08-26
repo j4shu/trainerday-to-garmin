@@ -1,7 +1,7 @@
 # TrainerDay to Garmin Connect
 
 Automatically uploads the latest [TrainerDay](https://trainerday.com/) indoor
-cycling workout to [Garmin Connect](https://connect.garmin.com/) and names it.
+cycling workout to [Garmin Connect](https://connect.garmin.com/), named and typed.
 
 ## Motivation
 
@@ -29,15 +29,14 @@ This script simply automates the manual process above. When you run it, it:
 3. Takes the activity name from the filename, so name the file after the
    workout before running.
    - For example, `Z2 60%.fit` becomes `Z2 60%`.
-4. Rewrites `sub_sport` to `virtual_activity` in a temp copy of the file (via
-   [`fit-tool`](https://pypi.org/project/fit-tool/)), so Garmin files the ride as
-   Virtual Cycling with no post-upload retype. Your original file is untouched.
-5. Uploads the patched file, then sets the activity name.
-
-FIT carries no activity-name field, so the name still has to be set over the API
-after upload. The script snapshots your most recent activity before uploading
-and uses that to detect when the new one appears. A pre-existing activity is
-never touched.
+4. Patches a temp copy of the file (via
+   [`fit-tool`](https://pypi.org/project/fit-tool/)), leaving your original
+   untouched. Both settings live on the session message:
+   - `sub_sport` becomes `virtual_activity`, so Garmin files the ride as Virtual
+     Cycling.
+   - `sport_profile_name` (field 110) becomes the activity name.
+5. Uploads the patched file. Nothing is edited over the API afterwards, so there
+   is no waiting on Garmin to index the activity first.
 
 [Intervals.icu](https://intervals.icu/) needs no handling here. It syncs from
 Garmin Connect and inherits both the activity name and type, including later
