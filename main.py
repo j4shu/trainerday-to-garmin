@@ -1,15 +1,18 @@
 import getpass
 import logging
+import os
 import tempfile
 import time
 from pathlib import Path
 
+import requests
+from dotenv import load_dotenv
 from fit_tool import FitFile
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.profile_type import SubSport
 from garminconnect import Garmin
 
-TRAINERDAY_DIR = Path("~/Library/CloudStorage/Dropbox/Apps/TrainerDay").expanduser()
+TRAINERDAY_API = "https://api.trainerday.com/api/v1"
 TOKENSTORE = Path("~/.garminconnect").expanduser()
 
 log = logging.getLogger("main")
@@ -53,14 +56,40 @@ def login_to_garmin() -> Garmin:
     return client
 
 
-def get_latest_fit_file(directory: Path) -> Path:
-    """Return the most recently modified .fit file in the given directory."""
-    files = [p for p in directory.glob("*.fit") if p.is_file()]
-    if not files:
-        raise FileNotFoundError(f"No .fit files found in: {directory}")
-    latest = max(files, key=lambda p: p.stat().st_mtime)
-    log.info(f"Found .fit file: {latest.resolve()}")
-    return latest
+def trainerday_get(path: str, **kwargs) -> requests.Response:
+    """GET from the TrainerDay API, authenticated with TRAINERDAY_API_KEY."""
+    api_key = os.environ.get("TRAINERDAY_API_KEY")
+    if not api_key:
+        raise RuntimeError("TRAINERDAY_API_KEY is not set; add it to .env")
+    response = requests.get(
+        f"{TRAINERDAY_API}{path}",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=30,
+        **kwargs,
+    )
+    response.raise_for_status()
+    return response
+
+
+def get_latest_trainerday_activity() -> dict:
+    """Return the most recent TrainerDay activity; the API lists them newest first."""
+    page = trainerday_get("/activities", params={"page": 1, "pageSize": 1}).json()
+    if not page["data"]:
+        raise ValueError("No TrainerDay activities found.")
+    activity = page["data"][0]
+    log.info(
+        f"Found TrainerDay activity: {activity['name']} ({activity['startDateUTC']})"
+    )
+    return activity
+
+
+def download_fit_file(activity_id: str) -> Path:
+    """Download a TrainerDay activity's .fit file to a temp file."""
+    content = trainerday_get(f"/activities/{activity_id}/fit").content
+    fit_file = Path(tempfile.mkstemp(suffix=".fit")[1])
+    fit_file.write_bytes(content)
+    log.info(f"Downloaded .fit file ({len(content)} bytes): {fit_file}")
+    return fit_file
 
 
 def prepare_fit_file(fit_file: Path) -> Path:
@@ -110,13 +139,15 @@ def wait_for_new_activity(
 
 def main() -> None:
     setup_logging()
+    load_dotenv()
 
     garmin_client = login_to_garmin()
     # record latest activity before upload so the new activity is never confused with an existing one
     previous_activity = garmin_client.get_last_activity()
 
-    # patch the fit file and upload it
-    fit_file = get_latest_fit_file(directory=TRAINERDAY_DIR)
+    # fetch the latest TrainerDay activity, then patch its fit file and upload it
+    trainerday_activity = get_latest_trainerday_activity()
+    fit_file = download_fit_file(activity_id=trainerday_activity["id"])
     patched_fit_file = prepare_fit_file(fit_file=fit_file)
     result = garmin_client.import_activity(str(patched_fit_file))
     log.info(f"Garmin upload initiated. Result: {result}")
@@ -127,7 +158,7 @@ def main() -> None:
     )
 
     # rename it
-    activity_name = fit_file.stem
+    activity_name = trainerday_activity["name"]
     log.info(f"Editing activity name to: {activity_name}")
     garmin_client.set_activity_name(new_activity.get("activityId"), activity_name)
 
