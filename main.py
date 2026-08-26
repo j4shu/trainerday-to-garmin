@@ -52,15 +52,17 @@ def login_to_garmin() -> Garmin:
     return client
 
 
-def get_latest_activity_file(directory: Path) -> Path:
+def get_latest_fit_file(directory: Path) -> Path:
     """Return the most recently modified .fit file in the given directory."""
     files = [p for p in directory.glob("*.fit") if p.is_file()]
     if not files:
         raise FileNotFoundError(f"No .fit files found in: {directory}")
-    return max(files, key=lambda p: p.stat().st_mtime)
+    latest = max(files, key=lambda p: p.stat().st_mtime)
+    log.info(f"Found .fit file: {latest.resolve()}")
+    return latest
 
 
-def prepare_fit(fit_file: Path, activity_name: str) -> Path:
+def prepare_fit_file(fit_file: Path, activity_name: str) -> Path:
     """Return a temp copy of the FIT that Garmin will file as Virtual Cycling under
     activity_name, so nothing has to be fixed up over the API after upload.
     """
@@ -97,15 +99,13 @@ def prepare_fit(fit_file: Path, activity_name: str) -> Path:
 
 def upload_garmin_activity(client: Garmin) -> None:
     """Upload the latest TrainerDay .fit to Garmin, named after the file."""
-    activity_file = get_latest_activity_file(directory=TRAINERDAY_DIR)
-    log.info(f"Found latest fit file: {activity_file.name}")
-    log.info(f"Full path: {activity_file.resolve()}")
+    activity_file = get_latest_fit_file(directory=TRAINERDAY_DIR)
 
-    # The filename (without extension) is the activity name
-    activity_name = activity_file.stem
-    log.info(f"Activity name: {activity_name}")
-
-    upload_file = prepare_fit(fit_file=activity_file, activity_name=activity_name)
+    log.info("Preparing .fit file for Garmin upload...")
+    upload_file = prepare_fit_file(
+        fit_file=activity_file, activity_name=activity_file.stem
+    )
+    log.info(f"Prepared .fit file for Garmin upload: {upload_file.name}")
 
     result = client.import_activity(str(upload_file))
     log.info(f"Garmin upload initiated. Result: {result}")
