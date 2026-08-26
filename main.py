@@ -1,12 +1,15 @@
 import getpass
 import logging
 import tempfile
-import time
 from pathlib import Path
 
+from fit_tool.definition_message import DefinitionMessage
 from fit_tool.fit_file import FitFile
+from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.session_message import SessionMessage
-from fit_tool.profile.profile_type import SubSport
+from fit_tool.profile.messages.workout_message import WorkoutMessage
+from fit_tool.profile.profile_type import Sport, SubSport
+from fit_tool.record import Record
 from garminconnect import Garmin
 
 TRAINERDAY_DIR = Path("~/Library/CloudStorage/Dropbox/Apps/TrainerDay").expanduser()
@@ -59,57 +62,52 @@ def get_latest_activity_file(directory: Path) -> Path:
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
-def set_fit_activity_type(fit_file: Path) -> Path:
-    """Return a temp copy of the FIT with every session's sub_sport set to
-    virtual_activity. TrainerDay writes sub_sport=generic, which Garmin files as
-    plain "Cycling"; virtual_activity makes it Virtual Cycling on upload, so no
-    post-upload retype is needed.
+def prepare_fit(fit_file: Path, activity_name: str) -> Path:
+    """Return a temp copy of the FIT that Garmin will file as Virtual Cycling under
+    activity_name, so nothing has to be fixed up over the API after upload.
+
+    TrainerDay writes sub_sport=generic and no workout message, which lands as a
+    plain, default-named "Cycling". Setting every session's sub_sport to
+    virtual_activity fixes the type, and a workout message carrying wkt_name sets
+    the title: Garmin names an activity after its workout when the file has one.
     """
     fit = FitFile.from_file(str(fit_file))
+
     sessions = [r.message for r in fit.records if isinstance(r.message, SessionMessage)]
     if not sessions:
         raise ValueError(f"No session message found in: {fit_file.name}")
-
     for session in sessions:
         session.sub_sport = SubSport.VIRTUAL_ACTIVITY
 
+    workout = WorkoutMessage()
+    workout.workout_name = activity_name
+    workout.sport = Sport.CYCLING
+    workout.sub_sport = SubSport.VIRTUAL_ACTIVITY
+    workout.num_valid_steps = 1
+    definition = DefinitionMessage.from_data_message(workout)
+    workout.set_definition_message(definition)
+
+    # file_id must stay first, so the workout goes directly after it
+    index = (
+        next(
+            i for i, r in enumerate(fit.records) if isinstance(r.message, FileIdMessage)
+        )
+        + 1
+    )
+    fit.records.insert(index, Record.from_message(workout))
+    fit.records.insert(index, Record.from_message(definition))
+    fit.mark_dirty()
+
     patched_file = Path(tempfile.mkstemp(suffix=".fit")[1])
     fit.to_file(str(patched_file))
-    log.info(f"Set sub_sport to virtual_activity in {len(sessions)} session(s).")
+    log.info(
+        f"Set virtual_activity in {len(sessions)} session(s), named {activity_name!r}."
+    )
     return patched_file
 
 
-def wait_for_garmin_upload(
-    client: Garmin,
-    last_activity: dict,
-    timeout: int = 30,
-    poll_interval: int = 5,
-) -> dict:
-    """Return the just-uploaded activity, identified as the new most-recent
-    activity once Garmin finishes indexing it.
-    """
-    last_activity_id = last_activity.get("activityId")
-    deadline = time.monotonic() + timeout
-    while True:
-        new_activity = client.get_last_activity()
-        new_activity_id = new_activity.get("activityId")
-
-        # If the last activity changed, that means the upload was processed and it's now the new last activity
-        if new_activity_id is not None and new_activity_id != last_activity_id:
-            log.info(f"Found new uploaded activity: {new_activity_id}")
-            return new_activity
-
-        if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"Waited {timeout}s but no new activity appeared after upload; giving up."
-            )
-        log.info(f"No new activity yet; polling again in {poll_interval}s...")
-        time.sleep(poll_interval)
-
-
 def upload_garmin_activity(client: Garmin) -> None:
-    """Upload the latest TrainerDay .fit to Garmin and name it after the file."""
-    # Find the latest FIT file exported by TrainerDay
+    """Upload the latest TrainerDay .fit to Garmin, named after the file."""
     activity_file = get_latest_activity_file(directory=TRAINERDAY_DIR)
     log.info(f"Found latest fit file: {activity_file.name}")
     log.info(f"Full path: {activity_file.resolve()}")
@@ -118,27 +116,10 @@ def upload_garmin_activity(client: Garmin) -> None:
     activity_name = activity_file.stem
     log.info(f"Activity name: {activity_name}")
 
-    # Set the activity type in the file so Garmin files it as Virtual Cycling
-    upload_file = set_fit_activity_type(activity_file)
+    upload_file = prepare_fit(activity_file, activity_name)
 
-    # Save the current last activity before upload so we can recognise the newly-created one
-    # and never touch a pre-existing activity.
-    last_activity = client.get_last_activity()
-
-    # Upload the new activity
     result = client.import_activity(str(upload_file))
     log.info(f"Garmin upload initiated. Result: {result}")
-
-    # Wait for it to appear
-    new_activity = wait_for_garmin_upload(client=client, last_activity=last_activity)
-    new_activity_id = new_activity.get("activityId")
-
-    # Sleep to let Garmin activity processing to settle before editing
-    time.sleep(3)
-
-    # FIT carries no activity name, so it still has to be set over the API
-    log.info(f"Editing activity name to: {activity_name}")
-    client.set_activity_name(new_activity_id, activity_name)
 
 
 def main() -> None:
