@@ -3,17 +3,22 @@ import logging
 import os
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
 from fit_tool import FitFile
+from fit_tool.profile.messages.activity_message import ActivityMessage
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.profile_type import SubSport
 from garminconnect import Garmin
 
 TRAINERDAY_API = "https://api.trainerday.com/api/v1"
 TOKENSTORE = Path("~/.garminconnect").expanduser()
+LOCAL_ZONE = ZoneInfo("America/New_York")
+FIT_EPOCH = datetime(1989, 12, 31, tzinfo=UTC)
 
 log = logging.getLogger("main")
 
@@ -89,9 +94,23 @@ def download_fit(activity_id: str) -> bytes:
     return content
 
 
+def set_local_timestamp(activity: ActivityMessage) -> None:
+    """Declare the activity's local time as LOCAL_ZONE. Garmin reads the timezone off
+    the gap between local_timestamp and timestamp, and TrainerDay leaves them equal,
+    so indoor rides (no GPS to infer a timezone from) land in Garmin as UTC.
+    """
+    utc = datetime.fromtimestamp(activity.timestamp / 1000, tz=UTC)
+    offset = utc.astimezone(LOCAL_ZONE).utcoffset()
+    # fit_tool exposes timestamp as unix ms, but local_timestamp as raw FIT seconds
+    activity.local_timestamp = int((utc + offset - FIT_EPOCH).total_seconds())
+    log.info(
+        f"Set local timezone to {LOCAL_ZONE} (UTC{offset.total_seconds() / 3600:+g})."
+    )
+
+
 def prepare_fit(fit_bytes: bytes) -> bytes:
-    """Return the FIT with every session's sub_sport set to virtual_activity, so
-    Garmin files it as Virtual Cycling instead of Cycling.
+    """Return the FIT with every session's sub_sport set to virtual_activity, so Garmin
+    files it as Virtual Cycling instead of Cycling, and with the local timezone declared.
     """
     log.info("Preparing .fit file for Garmin upload...")
     fit = FitFile.from_bytes(fit_bytes)
@@ -103,6 +122,16 @@ def prepare_fit(fit_bytes: bytes) -> bytes:
         session.sub_sport = SubSport.VIRTUAL_ACTIVITY
 
     log.info("Set sub_sport to virtual_activity.")
+
+    activities = [
+        r.message for r in fit.records if isinstance(r.message, ActivityMessage)
+    ]
+    if not activities:
+        raise ValueError("No activity message found in the .fit file.")
+
+    for activity in activities:
+        set_local_timestamp(activity=activity)
+
     return fit.to_bytes()
 
 
