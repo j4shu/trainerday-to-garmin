@@ -4,17 +4,13 @@ import tempfile
 import time
 from pathlib import Path
 
+from fit_tool.fit_file import FitFile
+from fit_tool.profile.messages.session_message import SessionMessage
+from fit_tool.profile.profile_type import SubSport
 from garminconnect import Garmin
 
 TRAINERDAY_DIR = Path("~/Library/CloudStorage/Dropbox/Apps/TrainerDay").expanduser()
 TOKENSTORE = Path("~/.garminconnect").expanduser()
-
-# TrainerDay writes sub_sport=generic, which Garmin files as plain "Cycling".
-# Setting it to virtual_activity makes Garmin file the ride as Virtual Cycling,
-# so no post-upload retype is needed. Values are from the FIT profile.
-SESSION_GLOBAL_MESG_NUM = 18
-SUB_SPORT_FIELD_NUM = 6
-SUB_SPORT_VIRTUAL_ACTIVITY = 58
 
 log = logging.getLogger("main")
 
@@ -63,82 +59,23 @@ def get_latest_activity_file(directory: Path) -> Path:
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
-def fit_crc(data: bytes) -> int:
-    """FIT CRC-16, per the nibble-table algorithm in the FIT SDK."""
-    # fmt: off
-    table = (0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
-             0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400)
-    # fmt: on
-    crc = 0
-    for byte in data:
-        for nibble in (byte & 0x0F, (byte >> 4) & 0x0F):
-            tmp = table[crc & 0x0F]
-            crc = ((crc >> 4) & 0x0FFF) ^ tmp ^ table[nibble]
-    return crc
-
-
 def set_fit_activity_type(fit_file: Path) -> Path:
     """Return a temp copy of the FIT with every session's sub_sport set to
-    virtual_activity. Patches the single byte in place and recomputes the file
-    CRC, so everything else in the file is preserved exactly.
+    virtual_activity. TrainerDay writes sub_sport=generic, which Garmin files as
+    plain "Cycling"; virtual_activity makes it Virtual Cycling on upload, so no
+    post-upload retype is needed.
     """
-    data = bytearray(fit_file.read_bytes())
-    end = data[0] + int.from_bytes(data[4:8], "little")  # header + data size
-    pos, definitions, patched = data[0], {}, 0
+    fit = FitFile.from_file(str(fit_file))
+    sessions = [r.message for r in fit.records if isinstance(r.message, SessionMessage)]
+    if not sessions:
+        raise ValueError(f"No session message found in: {fit_file.name}")
 
-    while pos < end:
-        record_header = data[pos]
-        pos += 1
+    for session in sessions:
+        session.sub_sport = SubSport.VIRTUAL_ACTIVITY
 
-        if record_header & 0x80:  # compressed timestamp: data, never a definition
-            pos += definitions[(record_header >> 5) & 0x03]["size"]
-            continue
-
-        local_num = record_header & 0x0F
-        if record_header & 0x40:  # definition message
-            pos += 1  # reserved
-            endian = "big" if data[pos] else "little"
-            pos += 1
-            global_num = int.from_bytes(data[pos : pos + 2], endian)
-            pos += 2
-            num_fields = data[pos]
-            pos += 1
-            fields = []
-            for _ in range(num_fields):
-                fields.append((data[pos], data[pos + 1]))
-                pos += 3
-            dev_size = 0
-            if record_header & 0x20:  # developer fields follow
-                num_dev = data[pos]
-                pos += 1
-                for _ in range(num_dev):
-                    dev_size += data[pos + 1]
-                    pos += 3
-            definitions[local_num] = {
-                "global_num": global_num,
-                "fields": fields,
-                "size": sum(size for _, size in fields) + dev_size,
-            }
-            continue
-
-        definition = definitions[local_num]
-        if definition["global_num"] == SESSION_GLOBAL_MESG_NUM:
-            offset = pos
-            for field_num, field_size in definition["fields"]:
-                if field_num == SUB_SPORT_FIELD_NUM:
-                    data[offset] = SUB_SPORT_VIRTUAL_ACTIVITY
-                    patched += 1
-                    break
-                offset += field_size
-        pos += definition["size"]
-
-    if not patched:
-        raise ValueError(f"No session sub_sport field found in: {fit_file.name}")
-
-    data[end : end + 2] = fit_crc(bytes(data[:end])).to_bytes(2, "little")
     patched_file = Path(tempfile.mkstemp(suffix=".fit")[1])
-    patched_file.write_bytes(data)
-    log.info(f"Set sub_sport to virtual_activity in {patched} session message(s).")
+    fit.to_file(str(patched_file))
+    log.info(f"Set sub_sport to virtual_activity in {len(sessions)} session(s).")
     return patched_file
 
 

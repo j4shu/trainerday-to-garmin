@@ -29,9 +29,9 @@ This script simply automates the manual process above. When you run it, it:
 3. Takes the activity name from the filename, so name the file after the
    workout before running.
    - For example, `Z2 60%.fit` becomes `Z2 60%`.
-4. Patches `sub_sport` to `virtual_activity` in a temp copy of the file, so
-   Garmin files the ride as Virtual Cycling with no post-upload retype. This is
-   a single-byte edit plus a CRC recompute; nothing else in the file changes.
+4. Rewrites `sub_sport` to `virtual_activity` in a temp copy of the file (via
+   [`fit-tool`](https://pypi.org/project/fit-tool/)), so Garmin files the ride as
+   Virtual Cycling with no post-upload retype. Your original file is untouched.
 5. Uploads the patched file, then sets the activity name.
 
 FIT carries no activity-name field, so the name still has to be set over the API
