@@ -17,10 +17,8 @@ This script simply automates the above manual process.
 1. Logs in to Garmin. The credentials are cached at `~/.garminconnect` for future runs.
 2. Finds the most recent `.fit` file in your TrainerDay Dropbox folder and parses out the activity name.
    - The folder defaults to `~/Library/CloudStorage/Dropbox/Apps/TrainerDay`.
-3. Patches a temp copy of the `.fit` file (via [`fit-tool`](https://pypi.org/project/fit-tool/)) with the following edits:
-   - Sets `sub_sport` to `virtual_activity`, so Garmin sets the type to Virtual Cycling.
-   - Sets `sport_profile_name` to the activity name.
-4. Uploads the patched file.
+3. Patches a temp copy of the `.fit` file (via [`fit-tool`](https://pypi.org/project/fit-tool/)) and sets `sub_sport` to `virtual_activity` so Garmin sets the type to Virtual Cycling.
+4. Uploads the patched file, waits for Garmin to index it, then renames the activity.
 
 Note: Intervals.icu needs no handling here. It syncs from Garmin Connect and inherits both the activity name and type, including renames.
 
