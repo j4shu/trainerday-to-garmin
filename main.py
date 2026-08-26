@@ -1,6 +1,6 @@
 import getpass
 import logging
-import re
+import tempfile
 import time
 from pathlib import Path
 
@@ -9,18 +9,12 @@ from garminconnect import Garmin
 TRAINERDAY_DIR = Path("~/Library/CloudStorage/Dropbox/Apps/TrainerDay").expanduser()
 TOKENSTORE = Path("~/.garminconnect").expanduser()
 
-# TrainerDay FIT file format: "<date> <time> - <workout title>.fit", e.g.
-# 2026-06-09 20-35-37 - 5x3 120%, 2x 102%.fit
-TRAINERDAY_FILE_REGEX = re.compile(
-    r"^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} - (?P<title>.+)$"
-)
-
-# Desired activity type. Payload is from `client.get_activity_types()`
-ACTIVITY_TYPE_DTO = {
-    "typeId": 152,
-    "typeKey": "virtual_ride",
-    "parentTypeId": 2,
-}
+# TrainerDay writes sub_sport=generic, which Garmin files as plain "Cycling".
+# Setting it to virtual_activity makes Garmin file the ride as Virtual Cycling,
+# so no post-upload retype is needed. Values are from the FIT profile.
+SESSION_GLOBAL_MESG_NUM = 18
+SUB_SPORT_FIELD_NUM = 6
+SUB_SPORT_VIRTUAL_ACTIVITY = 58
 
 log = logging.getLogger("main")
 
@@ -69,6 +63,85 @@ def get_latest_activity_file(directory: Path) -> Path:
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
+def fit_crc(data: bytes) -> int:
+    """FIT CRC-16, per the nibble-table algorithm in the FIT SDK."""
+    # fmt: off
+    table = (0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
+             0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400)
+    # fmt: on
+    crc = 0
+    for byte in data:
+        for nibble in (byte & 0x0F, (byte >> 4) & 0x0F):
+            tmp = table[crc & 0x0F]
+            crc = ((crc >> 4) & 0x0FFF) ^ tmp ^ table[nibble]
+    return crc
+
+
+def set_fit_activity_type(fit_file: Path) -> Path:
+    """Return a temp copy of the FIT with every session's sub_sport set to
+    virtual_activity. Patches the single byte in place and recomputes the file
+    CRC, so everything else in the file is preserved exactly.
+    """
+    data = bytearray(fit_file.read_bytes())
+    end = data[0] + int.from_bytes(data[4:8], "little")  # header + data size
+    pos, definitions, patched = data[0], {}, 0
+
+    while pos < end:
+        record_header = data[pos]
+        pos += 1
+
+        if record_header & 0x80:  # compressed timestamp: data, never a definition
+            pos += definitions[(record_header >> 5) & 0x03]["size"]
+            continue
+
+        local_num = record_header & 0x0F
+        if record_header & 0x40:  # definition message
+            pos += 1  # reserved
+            endian = "big" if data[pos] else "little"
+            pos += 1
+            global_num = int.from_bytes(data[pos : pos + 2], endian)
+            pos += 2
+            num_fields = data[pos]
+            pos += 1
+            fields = []
+            for _ in range(num_fields):
+                fields.append((data[pos], data[pos + 1]))
+                pos += 3
+            dev_size = 0
+            if record_header & 0x20:  # developer fields follow
+                num_dev = data[pos]
+                pos += 1
+                for _ in range(num_dev):
+                    dev_size += data[pos + 1]
+                    pos += 3
+            definitions[local_num] = {
+                "global_num": global_num,
+                "fields": fields,
+                "size": sum(size for _, size in fields) + dev_size,
+            }
+            continue
+
+        definition = definitions[local_num]
+        if definition["global_num"] == SESSION_GLOBAL_MESG_NUM:
+            offset = pos
+            for field_num, field_size in definition["fields"]:
+                if field_num == SUB_SPORT_FIELD_NUM:
+                    data[offset] = SUB_SPORT_VIRTUAL_ACTIVITY
+                    patched += 1
+                    break
+                offset += field_size
+        pos += definition["size"]
+
+    if not patched:
+        raise ValueError(f"No session sub_sport field found in: {fit_file.name}")
+
+    data[end : end + 2] = fit_crc(bytes(data[:end])).to_bytes(2, "little")
+    patched_file = Path(tempfile.mkstemp(suffix=".fit")[1])
+    patched_file.write_bytes(data)
+    log.info(f"Set sub_sport to virtual_activity in {patched} session message(s).")
+    return patched_file
+
+
 def wait_for_garmin_upload(
     client: Garmin,
     last_activity: dict,
@@ -98,28 +171,25 @@ def wait_for_garmin_upload(
 
 
 def upload_garmin_activity(client: Garmin) -> None:
-    """Upload the latest TrainerDay .fit to Garmin and edit its name/type."""
+    """Upload the latest TrainerDay .fit to Garmin and name it after the file."""
     # Find the latest FIT file exported by TrainerDay
     activity_file = get_latest_activity_file(directory=TRAINERDAY_DIR)
     log.info(f"Found latest fit file: {activity_file.name}")
     log.info(f"Full path: {activity_file.resolve()}")
 
-    # Parse the activity name
-    match = TRAINERDAY_FILE_REGEX.match(activity_file.stem)
-    if not match:
-        raise ValueError(
-            f"Filename does not match the expected TrainerDay format "
-            f"'<YYYY-MM-DD> <HH-MM-SS> - <title>': {activity_file.name}"
-        )
-    activity_name = match.group("title").strip()
-    log.info(f"Parsed activity name: {activity_name}")
+    # The filename (without extension) is the activity name
+    activity_name = activity_file.stem
+    log.info(f"Activity name: {activity_name}")
+
+    # Set the activity type in the file so Garmin files it as Virtual Cycling
+    upload_file = set_fit_activity_type(activity_file)
 
     # Save the current last activity before upload so we can recognise the newly-created one
     # and never touch a pre-existing activity.
     last_activity = client.get_last_activity()
 
     # Upload the new activity
-    result = client.import_activity(str(activity_file))
+    result = client.import_activity(str(upload_file))
     log.info(f"Garmin upload initiated. Result: {result}")
 
     # Wait for it to appear
@@ -129,12 +199,9 @@ def upload_garmin_activity(client: Garmin) -> None:
     # Sleep to let Garmin activity processing to settle before editing
     time.sleep(3)
 
-    # Edit it
-    activity_type = ACTIVITY_TYPE_DTO["typeKey"]
+    # FIT carries no activity name, so it still has to be set over the API
     log.info(f"Editing activity name to: {activity_name}")
     client.set_activity_name(new_activity_id, activity_name)
-    log.info(f"Editing activity type to: {activity_type}")
-    client.set_activity_type(new_activity_id, *ACTIVITY_TYPE_DTO.values())
 
 
 def main() -> None:

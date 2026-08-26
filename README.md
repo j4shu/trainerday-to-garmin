@@ -9,9 +9,9 @@ TrainerDay can automatically export a `.fit` file of your indoor cycling workout
 to your Dropbox after you finish it.
 
 However, the file doesn't get automatically uploaded to Garmin Connect, so you
-have to do it yourself - manually. Not only that, when you upload the file,
-Garmin names the activity "Cycling", so you then have to rename it to something
-meaningful.
+have to do it yourself - manually. Not only that, TrainerDay writes the FIT with
+`sub_sport=generic`, so Garmin files the ride as plain "Cycling" and names it
+"Cycling", leaving you to fix both by hand.
 
 The file format matters for more than convenience. Garmin computes Training
 Effect and Training Load server-side for `.fit` uploads only. The TCX schema has
@@ -26,13 +26,17 @@ This script simply automates the manual process above. When you run it, it:
    future runs.
 2. Finds the most recent `.fit` file in your TrainerDay Dropbox folder.
    - Defaults to `~/Library/CloudStorage/Dropbox/Apps/TrainerDay`.
-3. Parses the workout title from the filename.
-   - For example, `2026-06-09 20-35-37 - Z2 60%.fit` becomes `Z2 60%`.
-4. Performs the upload, then sets the activity name and type.
+3. Takes the activity name from the filename, so name the file after the
+   workout before running.
+   - For example, `Z2 60%.fit` becomes `Z2 60%`.
+4. Patches `sub_sport` to `virtual_activity` in a temp copy of the file, so
+   Garmin files the ride as Virtual Cycling with no post-upload retype. This is
+   a single-byte edit plus a CRC recompute; nothing else in the file changes.
+5. Uploads the patched file, then sets the activity name.
 
-Editing activity fields can only happen after the initial upload. The script
-handles this by snapshotting your most recent activity before upload and then
-uses that to detect when the new activity appears. A pre-existing activity is
+FIT carries no activity-name field, so the name still has to be set over the API
+after upload. The script snapshots your most recent activity before uploading
+and uses that to detect when the new one appears. A pre-existing activity is
 never touched.
 
 [Intervals.icu](https://intervals.icu/) needs no handling here. It syncs from
