@@ -63,13 +63,6 @@ def get_latest_activity_file(directory: Path) -> Path:
 def prepare_fit(fit_file: Path, activity_name: str) -> Path:
     """Return a temp copy of the FIT that Garmin will file as Virtual Cycling under
     activity_name, so nothing has to be fixed up over the API after upload.
-
-    TrainerDay writes sub_sport=generic and no name, which lands as a plain
-    "Cycling" titled after its type. Both live on the session message: sub_sport
-    sets the type, and sport_profile_name (field 110) sets the title.
-
-    The session is rebuilt rather than edited, because the decoded message has no
-    slot for a field TrainerDay never wrote. Every other message is passed through.
     """
     fit = FitFile.from_file(str(fit_file))
 
@@ -94,7 +87,9 @@ def prepare_fit(fit_file: Path, activity_name: str) -> Path:
 
 
 def rebuild_session(session: SessionMessage, activity_name: str) -> SessionMessage:
-    """Return a copy of session with growable fields, retyped and named."""
+    """Return a copy of session, retyped and named. Rebuilt rather than edited
+    because the decoded message has no slot for a field TrainerDay never wrote.
+    """
     rebuilt = SessionMessage()
     rebuilt.local_id = session.local_id
     for field in session.fields:
