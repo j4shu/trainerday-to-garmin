@@ -16,7 +16,9 @@ This script simply automates the above manual process.
 
 1. Logs in to Garmin. The credentials are cached at `~/.garminconnect` for future runs.
 2. Fetches your most recent activity from the TrainerDay API and downloads it as a `.fit` file.
-3. Patches the `.fit` file (via [`fit-tool`](https://pypi.org/project/fit-tool/)): sets `sub_sport` to `virtual_activity` so Garmin sets the type to Virtual Cycling, and sets `local_timestamp` so Garmin shows the ride in your local timezone instead of UTC. The timezone is set in `set_local_timestamp` in `main.py`.
+3. Patches the `.fit` file (via [`fit-tool`](https://pypi.org/project/fit-tool/)):
+   - Sets `sub_sport` to `virtual_activity` so Garmin sets the type to Virtual Cycling.
+   - Sets `local_timestamp` to the America/New_York timezone, so Garmin shows the ride in local time instead of UTC.
 4. Uploads the patched `.fit` file, waits for Garmin to index it, then renames the activity.
 
 Note: Intervals.icu needs no handling here. It syncs from Garmin Connect and inherits both the activity name and type, including renames.

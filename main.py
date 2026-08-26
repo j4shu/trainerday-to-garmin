@@ -43,7 +43,7 @@ def login_to_garmin() -> Garmin:
         try:
             client = Garmin()
             # validates + refreshes if near expiry
-            client.login(tokenstore=str(TOKENSTORE))
+            client.login(str(TOKENSTORE))
             log.info(f"Found cached Garmin session: {TOKENSTORE}.")
             return client
         except Exception as exc:
@@ -52,11 +52,11 @@ def login_to_garmin() -> Garmin:
     email = input("Garmin Connect email: ").strip()
     password = getpass.getpass("Garmin Connect password: ")
     client = Garmin(
-        email=email,
-        password=password,
+        email,
+        password,
         prompt_mfa=lambda: input("MFA/2FA code: ").strip(),
     )
-    client.login(tokenstore=str(TOKENSTORE))  # caches tokens to TOKENSTORE
+    client.login(str(TOKENSTORE))  # caches tokens to TOKENSTORE
     log.info(f"Successfully logged in. Garmin session cached: {TOKENSTORE}")
     return client
 
@@ -170,15 +170,17 @@ def main() -> None:
     # record latest activity before upload so the new activity is never confused with an existing one
     previous_activity = garmin_client.get_last_activity()
 
-    # fetch the latest TrainerDay activity as a .fit file and patch it
+    # fetch the latest TrainerDay activity as a .fit file
     trainerday_activity = get_latest_trainerday_activity()
     fit_bytes = download_fit(activity_id=trainerday_activity["id"])
-    patched_fit_bytes = prepare_fit(fit_bytes=fit_bytes)
 
-    # upload the .fit file
+    # patch the .fit file
+    patched_fit_bytes = prepare_fit(fit_bytes=fit_bytes)
     fit_file = Path(tempfile.mkstemp(suffix=".fit")[1])
     fit_file.write_bytes(patched_fit_bytes)
-    result = garmin_client.import_activity(activity_path=str(fit_file))
+
+    # upload the .fit file
+    result = garmin_client.import_activity(str(fit_file))
     log.info(f"Garmin upload initiated. Result: {result}")
 
     # wait for it to show up
@@ -189,9 +191,7 @@ def main() -> None:
     # rename it
     activity_name = trainerday_activity["name"]
     log.info(f"Editing activity name to: {activity_name}")
-    garmin_client.set_activity_name(
-        activity_id=new_activity.get("activityId"), title=activity_name
-    )
+    garmin_client.set_activity_name(new_activity.get("activityId"), activity_name)
     log.info("Done.")
 
 
