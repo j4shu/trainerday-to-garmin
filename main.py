@@ -16,10 +16,13 @@ log = logging.getLogger("main")
 
 
 def setup_logging() -> None:
+    # force, because fit_tool calls basicConfig on import, which would otherwise
+    # make this a no-op and leave the root logger at WARNING.
     logging.basicConfig(
         level=logging.INFO,
         format="[%(asctime)s %(levelname)-7s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
     )
 
 
