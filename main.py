@@ -84,32 +84,28 @@ def get_latest_trainerday_activity() -> dict:
     return activity
 
 
-def download_fit_file(activity_id: str) -> Path:
-    """Download a TrainerDay activity's .fit file to a temp file."""
+def download_fit(activity_id: str) -> bytes:
+    """Download a TrainerDay activity's .fit file."""
     content = trainerday_get(path=f"/activities/{activity_id}/fit").content
-    fit_file = Path(tempfile.mkstemp(suffix=".fit")[1])
-    fit_file.write_bytes(content)
-    log.info(f"Downloaded .fit file ({len(content)} bytes): {fit_file}")
-    return fit_file
+    log.info(f"Downloaded .fit file ({len(content)} bytes).")
+    return content
 
 
-def prepare_fit_file(fit_file: Path) -> Path:
-    """Return a temp copy of the FIT with every session's sub_sport set to
-    virtual_activity, so Garmin files it as Virtual Cycling instead of Cycling.
+def prepare_fit(fit_bytes: bytes) -> bytes:
+    """Return the FIT with every session's sub_sport set to virtual_activity, so
+    Garmin files it as Virtual Cycling instead of Cycling.
     """
     log.info("Preparing .fit file for Garmin upload...")
-    fit = FitFile.from_file(path=str(fit_file))
+    fit = FitFile.from_bytes(fit_bytes)
     sessions = [r.message for r in fit.records if isinstance(r.message, SessionMessage)]
     if not sessions:
-        raise ValueError(f"No session message found in: {fit_file.name}")
+        raise ValueError("No session message found in the .fit file.")
 
     for session in sessions:
         session.sub_sport = SubSport.VIRTUAL_ACTIVITY
 
-    patched_file = Path(tempfile.mkstemp(suffix=".fit")[1])
-    fit.to_file(path=str(patched_file))
     log.info(f"Set sub_sport to virtual_activity in {len(sessions)} session(s).")
-    return patched_file
+    return fit.to_bytes()
 
 
 def wait_for_new_activity(
@@ -148,9 +144,13 @@ def main() -> None:
 
     # fetch the latest TrainerDay activity, then patch its fit file and upload it
     trainerday_activity = get_latest_trainerday_activity()
-    fit_file = download_fit_file(activity_id=trainerday_activity["id"])
-    patched_fit_file = prepare_fit_file(fit_file=fit_file)
-    result = garmin_client.import_activity(activity_path=str(patched_fit_file))
+    fit_bytes = download_fit(activity_id=trainerday_activity["id"])
+    patched_fit_bytes = prepare_fit(fit_bytes=fit_bytes)
+
+    # import_activity only takes a path, so the patched fit has to hit disk once
+    fit_file = Path(tempfile.mkstemp(suffix=".fit")[1])
+    fit_file.write_bytes(patched_fit_bytes)
+    result = garmin_client.import_activity(activity_path=str(fit_file))
     log.info(f"Garmin upload initiated. Result: {result}")
 
     # wait for it to show up
