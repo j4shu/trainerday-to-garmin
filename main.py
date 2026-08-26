@@ -3,9 +3,8 @@ import logging
 import tempfile
 from pathlib import Path
 
+from fit_tool import FitFile, FitFileBuilder
 from fit_tool.data_message import DataMessage
-from fit_tool.fit_file import FitFile
-from fit_tool.fit_file_builder import FitFileBuilder
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.profile_type import SubSport
 from garminconnect import Garmin
@@ -103,8 +102,8 @@ def main() -> None:
 
     client = login_to_garmin()
     fit_file = get_latest_fit_file(directory=TRAINERDAY_DIR)
-    new_fit_file = prepare_fit_file(fit_file=fit_file, activity_name=fit_file.stem)
-    result = client.import_activity(str(new_fit_file))
+    patched_fit_file = prepare_fit_file(fit_file=fit_file, activity_name=fit_file.stem)
+    result = client.import_activity(str(patched_fit_file))
     log.info(f"Garmin upload initiated. Result: {result}")
 
 
