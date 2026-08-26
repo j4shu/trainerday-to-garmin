@@ -13,6 +13,7 @@ from fit_tool import FitFile
 from fit_tool.profile.messages.activity_message import ActivityMessage
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.profile_type import SubSport
+from fit_tool.utils.conversions import to_seconds_since_1989_epoch
 from garminconnect import Garmin
 
 TRAINERDAY_API = "https://api.trainerday.com/api/v1"
@@ -100,9 +101,10 @@ def set_local_timestamp(activity: ActivityMessage) -> None:
     zone = ZoneInfo("America/New_York")
     utc = datetime.fromtimestamp(activity.timestamp / 1000, tz=UTC)
     offset = utc.astimezone(zone).utcoffset()
-    # fit_tool exposes timestamp as unix ms, but local_timestamp as raw FIT seconds
-    fit_epoch = datetime(1989, 12, 31, tzinfo=UTC)
-    activity.local_timestamp = int((utc + offset - fit_epoch).total_seconds())
+    # fit_tool exposes timestamp as unix ms, but local_timestamp in the FIT wire format
+    activity.local_timestamp = to_seconds_since_1989_epoch(
+        activity.timestamp + int(offset.total_seconds() * 1000)
+    )
     log.info(f"Set local timezone to {zone} (UTC{offset.total_seconds() / 3600:+g}).")
 
 
