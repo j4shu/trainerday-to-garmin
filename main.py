@@ -38,7 +38,8 @@ def login_to_garmin() -> Garmin:
     if TOKENSTORE.exists():
         try:
             client = Garmin()
-            client.login(str(TOKENSTORE))  # validates + refreshes if near expiry
+            # validates + refreshes if near expiry
+            client.login(tokenstore=str(TOKENSTORE))
             log.info(f"Found cached Garmin session: {TOKENSTORE}.")
             return client
         except Exception as exc:
@@ -51,7 +52,7 @@ def login_to_garmin() -> Garmin:
         password=password,
         prompt_mfa=lambda: input("MFA/2FA code: ").strip(),
     )
-    client.login(str(TOKENSTORE))  # caches tokens to TOKENSTORE
+    client.login(tokenstore=str(TOKENSTORE))  # caches tokens to TOKENSTORE
     log.info(f"Successfully logged in. Garmin session cached: {TOKENSTORE}")
     return client
 
@@ -73,7 +74,7 @@ def trainerday_get(path: str, **kwargs) -> requests.Response:
 
 def get_latest_trainerday_activity() -> dict:
     """Return the most recent TrainerDay activity; the API lists them newest first."""
-    page = trainerday_get("/activities", params={"page": 1, "pageSize": 1}).json()
+    page = trainerday_get(path="/activities", params={"page": 1, "pageSize": 1}).json()
     if not page["data"]:
         raise ValueError("No TrainerDay activities found.")
     activity = page["data"][0]
@@ -85,7 +86,7 @@ def get_latest_trainerday_activity() -> dict:
 
 def download_fit_file(activity_id: str) -> Path:
     """Download a TrainerDay activity's .fit file to a temp file."""
-    content = trainerday_get(f"/activities/{activity_id}/fit").content
+    content = trainerday_get(path=f"/activities/{activity_id}/fit").content
     fit_file = Path(tempfile.mkstemp(suffix=".fit")[1])
     fit_file.write_bytes(content)
     log.info(f"Downloaded .fit file ({len(content)} bytes): {fit_file}")
@@ -97,7 +98,7 @@ def prepare_fit_file(fit_file: Path) -> Path:
     virtual_activity, so Garmin files it as Virtual Cycling instead of Cycling.
     """
     log.info("Preparing .fit file for Garmin upload...")
-    fit = FitFile.from_file(str(fit_file))
+    fit = FitFile.from_file(path=str(fit_file))
     sessions = [r.message for r in fit.records if isinstance(r.message, SessionMessage)]
     if not sessions:
         raise ValueError(f"No session message found in: {fit_file.name}")
@@ -106,7 +107,7 @@ def prepare_fit_file(fit_file: Path) -> Path:
         session.sub_sport = SubSport.VIRTUAL_ACTIVITY
 
     patched_file = Path(tempfile.mkstemp(suffix=".fit")[1])
-    fit.to_file(str(patched_file))
+    fit.to_file(path=str(patched_file))
     log.info(f"Set sub_sport to virtual_activity in {len(sessions)} session(s).")
     return patched_file
 
@@ -149,7 +150,7 @@ def main() -> None:
     trainerday_activity = get_latest_trainerday_activity()
     fit_file = download_fit_file(activity_id=trainerday_activity["id"])
     patched_fit_file = prepare_fit_file(fit_file=fit_file)
-    result = garmin_client.import_activity(str(patched_fit_file))
+    result = garmin_client.import_activity(activity_path=str(patched_fit_file))
     log.info(f"Garmin upload initiated. Result: {result}")
 
     # wait for it to show up
@@ -160,7 +161,10 @@ def main() -> None:
     # rename it
     activity_name = trainerday_activity["name"]
     log.info(f"Editing activity name to: {activity_name}")
-    garmin_client.set_activity_name(new_activity.get("activityId"), activity_name)
+    garmin_client.set_activity_name(
+        activity_id=new_activity.get("activityId"), title=activity_name
+    )
+    log.info("Done.")
 
 
 if __name__ == "__main__":
