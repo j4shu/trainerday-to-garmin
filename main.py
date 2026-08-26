@@ -105,7 +105,7 @@ def upload_garmin_activity(client: Garmin) -> None:
     activity_name = activity_file.stem
     log.info(f"Activity name: {activity_name}")
 
-    upload_file = prepare_fit(activity_file, activity_name)
+    upload_file = prepare_fit(fit_file=activity_file, activity_name=activity_name)
 
     result = client.import_activity(str(upload_file))
     log.info(f"Garmin upload initiated. Result: {result}")
