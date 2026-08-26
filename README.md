@@ -27,7 +27,7 @@ Note: Intervals.icu needs no handling here. It syncs from Garmin Connect and inh
 
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/) for dependency management
-- TrainerDay account, with an API key from [trainerday.com/developer](https://api.trainerday.com/developer)
+- TrainerDay account, with an API key from [TrainerDay API](https://api.trainerday.com/)
 - Garmin Connect account
 
 ## Setup
