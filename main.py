@@ -78,16 +78,14 @@ def get_latest_trainerday_activity() -> dict:
     if not page["data"]:
         raise ValueError("No TrainerDay activities found.")
     activity = page["data"][0]
-    log.info(
-        f"Found TrainerDay activity: {activity['name']} ({activity['startDateUTC']})"
-    )
+    log.info(f"Found TrainerDay activity: {activity['name']}")
     return activity
 
 
 def download_fit(activity_id: str) -> bytes:
     """Download a TrainerDay activity's .fit file."""
     content = trainerday_get(path=f"/activities/{activity_id}/fit").content
-    log.info(f"Downloaded .fit file ({len(content)} bytes).")
+    log.info("Downloaded .fit file.")
     return content
 
 
@@ -104,7 +102,7 @@ def prepare_fit(fit_bytes: bytes) -> bytes:
     for session in sessions:
         session.sub_sport = SubSport.VIRTUAL_ACTIVITY
 
-    log.info(f"Set sub_sport to virtual_activity in {len(sessions)} session(s).")
+    log.info("Set sub_sport to virtual_activity.")
     return fit.to_bytes()
 
 
@@ -139,15 +137,16 @@ def main() -> None:
     load_dotenv()
 
     garmin_client = login_to_garmin()
+
     # record latest activity before upload so the new activity is never confused with an existing one
     previous_activity = garmin_client.get_last_activity()
 
-    # fetch the latest TrainerDay activity, then patch its fit file and upload it
+    # fetch the latest TrainerDay activity as a .fit file and patch it
     trainerday_activity = get_latest_trainerday_activity()
     fit_bytes = download_fit(activity_id=trainerday_activity["id"])
     patched_fit_bytes = prepare_fit(fit_bytes=fit_bytes)
 
-    # import_activity only takes a path, so the patched fit has to hit disk once
+    # upload the .fit file
     fit_file = Path(tempfile.mkstemp(suffix=".fit")[1])
     fit_file.write_bytes(patched_fit_bytes)
     result = garmin_client.import_activity(activity_path=str(fit_file))
