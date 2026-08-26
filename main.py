@@ -98,23 +98,14 @@ def prepare_fit_file(fit_file: Path, activity_name: str) -> Path:
     return patched_file
 
 
-def upload_garmin_activity(client: Garmin) -> None:
-    """Upload the latest TrainerDay .fit to Garmin, named after the file."""
-    activity_file = get_latest_fit_file(directory=TRAINERDAY_DIR)
-    upload_file = prepare_fit_file(
-        fit_file=activity_file, activity_name=activity_file.stem
-    )
-
-    result = client.import_activity(str(upload_file))
-    log.info(f"Garmin upload initiated. Result: {result}")
-
-
 def main() -> None:
     setup_logging()
 
     client = login_to_garmin()
-    upload_garmin_activity(client=client)
-    log.info("Done.")
+    fit_file = get_latest_fit_file(directory=TRAINERDAY_DIR)
+    new_fit_file = prepare_fit_file(fit_file=fit_file, activity_name=fit_file.stem)
+    result = client.import_activity(str(new_fit_file))
+    log.info(f"Garmin upload initiated. Result: {result}")
 
 
 if __name__ == "__main__":
