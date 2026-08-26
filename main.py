@@ -100,10 +100,10 @@ def prepare_fit_file(fit_file: Path, activity_name: str) -> Path:
 def main() -> None:
     setup_logging()
 
-    client = login_to_garmin()
+    garmin_client = login_to_garmin()
     fit_file = get_latest_fit_file(directory=TRAINERDAY_DIR)
     patched_fit_file = prepare_fit_file(fit_file=fit_file, activity_name=fit_file.stem)
-    result = client.import_activity(str(patched_fit_file))
+    result = garmin_client.import_activity(str(patched_fit_file))
     log.info(f"Garmin upload initiated. Result: {result}")
 
 
