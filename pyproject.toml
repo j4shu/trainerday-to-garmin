@@ -10,6 +10,6 @@ dependencies = [
     "requests>=2.34.2",
 ]
 
-# A single-script app, not an installable package: uv just manages the venv.
+# A standalone app, not an installable package: uv just manages the venv.
 [tool.uv]
 package = false
