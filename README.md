@@ -1,6 +1,6 @@
-# TrainerDay to Garmin Connect
+# TrainerDay to Garmin Connect and Intervals.icu
 
-Automatically uploads the latest [TrainerDay](https://trainerday.com/) indoor cycling workout to [Garmin Connect](https://connect.garmin.com/).
+Automatically uploads the latest [TrainerDay](https://trainerday.com/) indoor cycling workout to [Garmin Connect](https://connect.garmin.com/) and waits for it to sync to Intervals.icu
 
 ## Motivation
 
@@ -18,10 +18,11 @@ This script simply automates the above manual process.
 2. Fetches your most recent activity from the TrainerDay API and downloads it as a `.fit` file.
 3. Patches the `.fit` file (via [`fit-tool`](https://pypi.org/project/fit-tool/)):
    - Sets `sub_sport` to `virtual_activity` so Garmin sets the type to Virtual Cycling.
-   - Sets `local_timestamp` to the America/New_York timezone.
+   - Sets `local_timestamp` to the local timezone.
 4. Uploads the patched `.fit` file, waits for Garmin to index it, then renames the activity.
+5. Polls Intervals.icu until the activity syncs from Garmin.
 
-Note: Intervals.icu needs no handling here. It syncs from Garmin Connect and inherits both the activity name and type, including renames.
+Note: Intervals.icu needs no editing here. It syncs from Garmin Connect and inherits both the activity name and type, including renames.
 
 ## Requirements
 
@@ -29,6 +30,7 @@ Note: Intervals.icu needs no handling here. It syncs from Garmin Connect and inh
 - [`uv`](https://docs.astral.sh/uv/) for dependency management
 - TrainerDay account, with an API key from [TrainerDay API](https://api.trainerday.com/)
 - Garmin Connect account
+- Intervals.icu account, with an API key from [Intervals.icu settings](https://intervals.icu/settings)
 
 ## Setup
 
@@ -38,10 +40,11 @@ Install dependencies:
 uv sync
 ```
 
-Create `.env` and add your TrainerDay API key:
+Create `.env` and add your API keys:
 
 ```
 TRAINERDAY_API_KEY=<key>
+INTERVALS_API_KEY=<key>
 ```
 
 ## Usage

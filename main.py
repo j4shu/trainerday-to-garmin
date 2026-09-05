@@ -1,25 +1,17 @@
-import getpass
 import logging
 import os
 import tempfile
-import time
-from datetime import UTC, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
-import requests
 from dotenv import load_dotenv
-from fit_tool import FitFile
-from fit_tool.profile.messages.activity_message import ActivityMessage
-from fit_tool.profile.messages.session_message import SessionMessage
-from fit_tool.profile.profile_type import SubSport
-from fit_tool.utils.conversions import to_seconds_since_1989_epoch
-from garminconnect import Garmin
 
-TRAINERDAY_API = "https://api.trainerday.com/api/v1"
-TOKENSTORE = Path("~/.garminconnect").expanduser()
+from garmin import garmin_login, modify_fit, poll_new_garmin_activity
+from intervals import poll_intervals_icu_sync
+from trainerday import download_trainerday_fit, get_latest_trainerday_activity
 
-log = logging.getLogger("main")
+REQUIRED_ENV = ("TRAINERDAY_API_KEY", "INTERVALS_API_KEY")
+
+log = logging.getLogger(__name__)
 
 
 def setup_logging() -> None:
@@ -32,166 +24,50 @@ def setup_logging() -> None:
     )
 
 
-def login_to_garmin() -> Garmin:
-    """
-    Return an authenticated Garmin client, logging in at the start of a run.
-    Reuses the cached session at TOKENSTORE when present and still valid
-    (refreshing a near-expiry token); otherwise prompts for credentials (+ MFA)
-    and caches a fresh session.
-    """
-    if TOKENSTORE.exists():
-        try:
-            client = Garmin()
-            # validates + refreshes if near expiry
-            client.login(str(TOKENSTORE))
-            log.info(f"Found cached Garmin session: {TOKENSTORE}.")
-            return client
-        except Exception as exc:
-            log.warning(f"Cached session unusable: ({exc}); logging in fresh.")
-
-    email = input("Garmin Connect email: ").strip()
-    password = getpass.getpass("Garmin Connect password: ")
-    client = Garmin(
-        email,
-        password,
-        prompt_mfa=lambda: input("MFA/2FA code: ").strip(),
-    )
-    client.login(str(TOKENSTORE))  # caches tokens to TOKENSTORE
-    log.info(f"Successfully logged in. Garmin session cached: {TOKENSTORE}")
-    return client
-
-
-def trainerday_get(path: str, **kwargs) -> requests.Response:
-    """GET from the TrainerDay API, authenticated with TRAINERDAY_API_KEY."""
-    api_key = os.environ.get("TRAINERDAY_API_KEY")
-    if not api_key:
-        raise RuntimeError("TRAINERDAY_API_KEY is not set; add it to .env")
-    response = requests.get(
-        f"{TRAINERDAY_API}{path}",
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=30,
-        **kwargs,
-    )
-    response.raise_for_status()
-    return response
-
-
-def get_latest_trainerday_activity() -> dict:
-    """Return the most recent TrainerDay activity; the API lists them newest first."""
-    page = trainerday_get(path="/activities", params={"page": 1, "pageSize": 1}).json()
-    if not page["data"]:
-        raise ValueError("No TrainerDay activities found.")
-    activity = page["data"][0]
-    log.info(f"Found TrainerDay activity: {activity['name']}")
-    return activity
-
-
-def download_fit(activity_id: str) -> bytes:
-    """Download a TrainerDay activity's .fit file."""
-    content = trainerday_get(path=f"/activities/{activity_id}/fit").content
-    log.info("Downloaded .fit file.")
-    return content
-
-
-def set_local_timestamp(activity: ActivityMessage) -> None:
-    """Declare the activity's local timezone. Garmin reads the timezone off the gap
-    between local_timestamp and timestamp, and TrainerDay leaves them equal, so indoor
-    rides (no GPS to infer a timezone from) land in Garmin as UTC.
-    """
-    zone = ZoneInfo("America/New_York")
-    utc = datetime.fromtimestamp(activity.timestamp / 1000, tz=UTC)
-    offset = utc.astimezone(zone).utcoffset()
-    # fit_tool exposes timestamp as unix ms, but local_timestamp in the FIT wire format
-    activity.local_timestamp = to_seconds_since_1989_epoch(
-        activity.timestamp + int(offset.total_seconds() * 1000)
-    )
-    log.info(f"Set local timezone to {zone} (UTC{offset.total_seconds() / 3600:+g}).")
-
-
-def prepare_fit(fit_bytes: bytes) -> bytes:
-    """Return the FIT with every session's sub_sport set to virtual_activity, so Garmin
-    files it as Virtual Cycling instead of Cycling, and with the local timezone declared.
-    """
-    log.info("Preparing .fit file for Garmin upload...")
-    fit = FitFile.from_bytes(fit_bytes)
-    sessions = [r.message for r in fit.records if isinstance(r.message, SessionMessage)]
-    if not sessions:
-        raise ValueError("No session message found in the .fit file.")
-
-    for session in sessions:
-        session.sub_sport = SubSport.VIRTUAL_ACTIVITY
-
-    log.info("Set sub_sport to virtual_activity.")
-
-    activities = [
-        r.message for r in fit.records if isinstance(r.message, ActivityMessage)
-    ]
-    if not activities:
-        raise ValueError("No activity message found in the .fit file.")
-
-    for activity in activities:
-        set_local_timestamp(activity=activity)
-
-    return fit.to_bytes()
-
-
-def wait_for_new_activity(
-    garmin_client: Garmin,
-    previous_activity: dict,
-    timeout: int = 30,
-    poll_interval: int = 5,
-) -> dict:
-    """Return the just-uploaded activity, identified as the new most-recent activity
-    once Garmin finishes indexing it.
-    """
-    previous_id = previous_activity.get("activityId")
-    deadline = time.monotonic() + timeout
-    while True:
-        activity = garmin_client.get_last_activity()
-        activity_id = activity.get("activityId")
-        if activity_id is not None and activity_id != previous_id:
-            log.info(f"Found new uploaded activity: {activity_id}")
-            return activity
-
-        if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"Waited {timeout}s but no new activity appeared after upload; giving up."
-            )
-        log.info(f"No new activity yet; polling again in {poll_interval}s...")
-        time.sleep(poll_interval)
+def validate_env() -> None:
+    """Fail before the run touches Garmin if any required API key is missing."""
+    missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
+    if missing:
+        raise RuntimeError(f"Not set: {', '.join(missing)}. Add to .env")
 
 
 def main() -> None:
     setup_logging()
     load_dotenv()
+    validate_env()
 
-    garmin_client = login_to_garmin()
+    garmin_client = garmin_login()
 
     # record latest activity before upload so the new activity is never confused with an existing one
     previous_activity = garmin_client.get_last_activity()
 
     # fetch the latest TrainerDay activity as a .fit file
     trainerday_activity = get_latest_trainerday_activity()
-    fit_bytes = download_fit(activity_id=trainerday_activity["id"])
+    fit_bytes = download_trainerday_fit(activity_id=trainerday_activity["id"])
 
     # patch the .fit file
-    patched_fit_bytes = prepare_fit(fit_bytes=fit_bytes)
+    log.info("Modifying .fit file for upload...")
+    patched_fit_bytes = modify_fit(fit_bytes=fit_bytes)
     fit_file = Path(tempfile.mkstemp(suffix=".fit")[1])
     fit_file.write_bytes(patched_fit_bytes)
 
-    # upload the .fit file
+    # upload the .fit file to Garmin and poll
     result = garmin_client.import_activity(str(fit_file))
     log.info(f"Garmin upload initiated. Result: {result}")
-
-    # wait for it to show up
-    new_activity = wait_for_new_activity(
+    new_activity = poll_new_garmin_activity(
         garmin_client=garmin_client, previous_activity=previous_activity
     )
 
     # rename it
     activity_name = trainerday_activity["name"]
-    log.info(f"Editing activity name to: {activity_name}")
+    log.info(f"Changing Garmin activity name to: {activity_name}")
     garmin_client.set_activity_name(new_activity.get("activityId"), activity_name)
+
+    # wait for Intervals.icu to sync
+    poll_intervals_icu_sync(
+        expected_activity_id=new_activity["activityId"],
+        expected_activity_name=activity_name,
+    )
     log.info("Done.")
 
 
