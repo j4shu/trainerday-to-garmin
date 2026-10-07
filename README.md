@@ -68,3 +68,11 @@ INTERVALS_API_KEY=<key>
 ```
 uv run main.py
 ```
+
+## Development
+
+Install the git pre-commit hook:
+
+```
+uv run prek install
+```
