@@ -61,7 +61,7 @@ def main() -> None:
     # rename it
     activity_name = trainerday_activity["name"]
     log.info(f"Changing Garmin activity name to: {activity_name}")
-    garmin_client.set_activity_name(new_activity.get("activityId"), activity_name)
+    garmin_client.set_activity_name(str(new_activity["activityId"]), activity_name)
 
     # wait for Intervals.icu to sync
     poll_intervals_icu_sync(

@@ -9,7 +9,11 @@ from fit_tool.profile.messages.activity_message import ActivityMessage
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.profile_type import SubSport
 from fit_tool.utils.conversions import to_seconds_since_1989_epoch
-from garminconnect import Garmin
+from garminconnect import (
+    Garmin,
+    GarminConnectAuthenticationError,
+    GarminConnectConnectionError,
+)
 
 TOKENSTORE = Path("~/.garminconnect").expanduser()
 
@@ -30,7 +34,10 @@ def garmin_login() -> Garmin:
             client.login(str(TOKENSTORE))
             log.info(f"Found cached Garmin session: {TOKENSTORE}.")
             return client
-        except Exception as exc:
+        except (
+            GarminConnectAuthenticationError,
+            GarminConnectConnectionError,
+        ) as exc:
             log.warning(f"Cached session unusable: ({exc}); logging in fresh.")
 
     email = input("Garmin Connect email: ").strip()
@@ -64,9 +71,12 @@ def modify_fit(fit_bytes: bytes) -> bytes:
     if not activities:
         raise ValueError("No activity message found in the .fit file.")
     for activity in activities:
+        if activity.timestamp is None:
+            raise ValueError("Activity message has no timestamp.")
         utc = datetime.fromtimestamp(activity.timestamp / 1000, tz=UTC)
         local = utc.astimezone()
         offset = local.utcoffset()
+        assert offset is not None  # astimezone() is always aware
         # fit_tool exposes timestamp as unix ms, but local_timestamp in the FIT wire format
         activity.local_timestamp = to_seconds_since_1989_epoch(
             activity.timestamp + int(offset.total_seconds() * 1000)
@@ -78,19 +88,19 @@ def modify_fit(fit_bytes: bytes) -> bytes:
 
 def poll_new_garmin_activity(
     garmin_client: Garmin,
-    previous_activity: dict,
+    previous_activity: dict | None,
     timeout: int = 30,
     poll_interval: int = 5,
 ) -> dict:
     """Return the just-uploaded activity, identified as the new most-recent activity
     once Garmin finishes indexing it.
     """
-    previous_id = previous_activity.get("activityId")
+    previous_id = previous_activity and previous_activity.get("activityId")
     deadline = time.monotonic() + timeout
     while True:
         activity = garmin_client.get_last_activity()
-        activity_id = activity.get("activityId")
-        if activity_id is not None and activity_id != previous_id:
+        activity_id = activity and activity.get("activityId")
+        if activity and activity_id is not None and activity_id != previous_id:
             log.info(f"Found new uploaded activity: {activity_id}")
             return activity
 
