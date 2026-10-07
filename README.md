@@ -1,24 +1,24 @@
 # TrainerDay to Garmin Connect and Intervals.icu
 
-Automatically uploads the latest [TrainerDay](https://trainerday.com/) indoor
-cycling workout to [Garmin Connect](https://connect.garmin.com/) and waits for
-it to sync to Intervals.icu
+Uploads the latest [TrainerDay](https://trainerday.com/) indoor cycling workout
+to [Garmin Connect](https://connect.garmin.com/) and waits for it to sync to
+Intervals.icu
 
 ## Motivation
 
 TrainerDay can export a `.fit` file of your indoor cycling workout.
 
 However, the file doesn't get automatically uploaded to Garmin Connect, so you
-have to download it and do it yourself - manually. Not only that, when you
-upload the file, Garmin defaults the activity type to "Cycling" and names it
-"Cycling", so you then have to manually edit the activity type to "Virtual
-Cycling" and name it something meaningful. The activity type is specifically
-important for me to distinguish between indoor vs outdoor rides when viewing
-activities/totals on [Intervals.icu](https://intervals.icu/).
+have to manually download and upload it yourself. Not only that, when you upload
+the file, Garmin defaults the activity type to "Cycling" and names it "Cycling",
+so you then have to edit the activity type to "Virtual Cycling" and name it
+something meaningful. The activity type is specifically important for me to
+distinguish between indoor vs outdoor rides when viewing totals on
+[Intervals.icu](https://intervals.icu/).
 
 If you use Intervals.icu, you have to make the same edits there too.
 
-This script simply automates the above manual process.
+This project simply automates the above manual process.
 
 ## How It Works
 
@@ -35,13 +35,13 @@ This script simply automates the above manual process.
    the activity.
 5. Polls Intervals.icu until the activity syncs from Garmin.
 
-Note: Intervals.icu needs no editing here. It syncs from Garmin Connect and
-inherits both the activity name and type, including renames.
+Note: Intervals.icu needs no editing. It syncs from Garmin Connect and inherits
+both the activity name and type, including renames.
 
 ## Requirements
 
 - Python 3.12+
-- [`uv`](https://docs.astral.sh/uv/) for dependency management
+- [`uv`](https://docs.astral.sh/uv/)
 - TrainerDay account, with an API key from
   [TrainerDay API](https://api.trainerday.com/)
 - Garmin Connect account
