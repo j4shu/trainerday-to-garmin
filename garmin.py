@@ -16,6 +16,8 @@ from garminconnect import (
 )
 
 TOKENSTORE = Path("~/.garminconnect").expanduser()
+POLL_TIMEOUT = 30
+POLL_INTERVAL = 5
 
 log = logging.getLogger(__name__)
 
@@ -59,12 +61,10 @@ def modify_fit(fit_bytes: bytes) -> bytes:
     if not sessions:
         raise ValueError("No session message found in the .fit file.")
 
-    # change to virtual activity
     for session in sessions:
         session.sub_sport = SubSport.VIRTUAL_ACTIVITY
     log.info("Set sub_sport to virtual_activity.")
 
-    # set local timezone
     activities = [
         r.message for r in fit.records if isinstance(r.message, ActivityMessage)
     ]
@@ -87,16 +87,13 @@ def modify_fit(fit_bytes: bytes) -> bytes:
 
 
 def poll_new_garmin_activity(
-    garmin_client: Garmin,
-    previous_activity: dict | None,
-    timeout: int = 30,
-    poll_interval: int = 5,
+    garmin_client: Garmin, previous_activity: dict | None
 ) -> dict:
     """Return the just-uploaded activity, identified as the new most-recent activity
     once Garmin finishes indexing it.
     """
     previous_id = previous_activity and previous_activity.get("activityId")
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + POLL_TIMEOUT
     while True:
         activity = garmin_client.get_last_activity()
         activity_id = activity and activity.get("activityId")
@@ -106,7 +103,7 @@ def poll_new_garmin_activity(
 
         if time.monotonic() >= deadline:
             raise TimeoutError(
-                f"Waited {timeout}s but no new activity appeared after upload; giving up."
+                f"Waited {POLL_TIMEOUT}s but no new activity appeared after upload; giving up."
             )
-        log.info(f"No new Garmin activity yet; polling again in {poll_interval}s...")
-        time.sleep(poll_interval)
+        log.info(f"No new Garmin activity yet; polling again in {POLL_INTERVAL}s...")
+        time.sleep(POLL_INTERVAL)

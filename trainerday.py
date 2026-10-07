@@ -32,5 +32,4 @@ def get_latest_trainerday_activity() -> dict:
 
 def download_trainerday_fit(activity_id: str) -> bytes:
     """Download a TrainerDay activity's .fit file."""
-    content = trainerday_get(path=f"/activities/{activity_id}/fit").content
-    return content
+    return trainerday_get(path=f"/activities/{activity_id}/fit").content
