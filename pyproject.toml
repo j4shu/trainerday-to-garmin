@@ -13,3 +13,6 @@ dependencies = [
 # A standalone app, not an installable package: uv just manages the venv.
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = ["ruff>=0.16.10", "ty>=0.0.85"]
