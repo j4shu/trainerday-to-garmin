@@ -11,3 +11,17 @@ waits for the Intervals.icu sync. See README.md.
 - Do not run `uv run main.py` to test: it uploads to the real Garmin account and
   may prompt for login.
 - No tests; `uv run python -c 'import main'` is the smoke check.
+- `.env` (gitignored) holds `TRAINERDAY_API_KEY` and `INTERVALS_API_KEY`. Load
+  it for ad-hoc calls with `set -a; . ./.env; set +a` or
+  `uv run --env-file .env ...`. Never print key values and only send GET
+  requests.
+
+## APIs
+
+- Intervals.icu: OpenAPI spec at https://intervals.icu/api/v1/docs (viewer:
+  https://intervals.icu/api-docs.html). Basic auth, user `API_KEY`, password
+  `$INTERVALS_API_KEY`.
+- TrainerDay: no OpenAPI spec; docs at https://api.trainerday.com/.
+  `Authorization: Bearer $TRAINERDAY_API_KEY`.
+- Garmin Connect: no public API; the reference is the `garminconnect` package
+  source in `.venv`.
