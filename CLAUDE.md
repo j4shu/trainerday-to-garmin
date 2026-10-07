@@ -4,5 +4,5 @@
   key values; only send GET requests.
 - API refs:
   - Intervals.icu https://intervals.icu/api/v1/docs (OpenAPI)
-  - TrainerDay https://api.trainerday.com/ (HTML only), Garmin has no public API
-    (read the `garminconnect` source in `.venv`).
+  - TrainerDay https://api.trainerday.com/ (HTML only)
+  - Garmin has no public API (read the `garminconnect` source in `.venv`).
