@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any
 
 import requests
 
@@ -8,7 +9,7 @@ TRAINERDAY_API = "https://api.trainerday.com/api/v1"
 log = logging.getLogger(__name__)
 
 
-def trainerday_get(path: str, **kwargs) -> requests.Response:
+def trainerday_get(path: str, **kwargs: Any) -> requests.Response:
     """GET from the TrainerDay API, authenticated with TRAINERDAY_API_KEY."""
     response = requests.get(
         f"{TRAINERDAY_API}{path}",
@@ -20,7 +21,7 @@ def trainerday_get(path: str, **kwargs) -> requests.Response:
     return response
 
 
-def get_latest_trainerday_activity() -> dict:
+def get_latest_trainerday_activity() -> dict[str, Any]:
     """Return the most recent TrainerDay activity; the API lists them newest first."""
     page = trainerday_get(path="/activities", params={"page": 1, "pageSize": 1}).json()
     if not page["data"]:

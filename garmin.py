@@ -3,6 +3,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from fit_tool import FitFile
 from fit_tool.profile.messages.activity_message import ActivityMessage
@@ -87,8 +88,8 @@ def modify_fit(fit_bytes: bytes) -> bytes:
 
 
 def poll_new_garmin_activity(
-    garmin_client: Garmin, previous_activity: dict | None
-) -> dict:
+    garmin_client: Garmin, previous_activity: dict[str, Any] | None
+) -> dict[str, Any]:
     """Return the just-uploaded activity, identified as the new most-recent activity
     once Garmin finishes indexing it.
     """

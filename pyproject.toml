@@ -17,6 +17,9 @@ package = false
 [dependency-groups]
 dev = [
     "prek>=0.5.5",
+    "pyrefly>=1.4.0",
     "ruff>=0.16.10",
-    "ty>=0.0.85",
 ]
+
+[tool.pyrefly]
+preset = "strict"
